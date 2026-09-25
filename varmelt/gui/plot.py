@@ -479,13 +479,16 @@ class MeltChart(QWidget):
             return
         spanx = self._view_x1 - self._view_x0
         spany = self._view_y1 - self._view_y0
+        # pixel y grows downwards while the map's hot end sits at the top
+        # (small y): the box top is the high-Tm edge, the bottom the low end.
         vx = self._view_x0 + (x - pad_l) / plot_w * spanx
-        vy = self._view_y0 + (plot_h - (y - pad_t)) / plot_h * spany
+        t_top = self._view_y0 + (plot_h - (y - pad_t)) / plot_h * spany
+        t_bot = self._view_y0 + (plot_h - (y2 - pad_t)) / plot_h * spany
         new_spanx = spanx * (x2 - x) / plot_w
         new_spany = spany * (y2 - y) / plot_h
         if new_spanx < 2.0 or new_spany < 1.5:
             return
         self._view_x0, self._view_x1 = vx, vx + new_spanx
-        self._view_y0, self._view_y1 = vy, vy + new_spany
+        self._view_y0, self._view_y1 = t_bot, t_top
         self._clamp_view(self._view_x0, self._view_y0)
         self.update()

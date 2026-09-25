@@ -151,18 +151,32 @@ def test_chart_renders_png():
     # a drag rectangle zooms into the boxed region (left-drag rubber band)
     from PySide6.QtCore import QRectF
     ch.reset()
-    px = ch._pad_l + 1
-    py = ch._pad_t + 1
-    ch._rubber = QRectF(px, py, 0.0, 0.0)
-    rubber = QRectF(px, py, 100, 80)
-    ch._zoom_rect(rubber)
-    ok(ch._view_x1 - ch._view_x0 < ch._data_x1 - ch._data_x0,
-       "rubber-band zoom narrows the x view to the box")
-    ok(ch._view_y1 - ch._view_y0 < ch._data_y1 - ch._data_y0,
-       "rubber-band zoom narrows the y view to the box")
+    pad_l, pad_r, pad_t, pad_b = ch._pad_l, ch._pad_r, ch._pad_t, ch._pad_b
+    plot_w = ch.width() - pad_l - pad_r
+    plot_h = ch.height() - pad_t - pad_b
+    dx = ch._data_x1 - ch._data_x0
+    dy = ch._data_y1 - ch._data_y0
+    # box over the middle third of the x axis, middle band of the y axis
+    left = pad_l + plot_w / 3
+    right = pad_l + 2 * plot_w / 3
+    top = pad_t + plot_h / 3
+    bottom = pad_t + 2 * plot_h / 3
+    expect_x = ch._data_x0 + (left - pad_l) / plot_w * dx
+    expect_t_bot = ch._data_y0 + (plot_h - (bottom - pad_t)) / plot_h * dy
+    expect_t_top = ch._data_y0 + (plot_h - (top - pad_t)) / plot_h * dy
+    ch._zoom_rect(QRectF(left, top, right - left, bottom - top))
+    ok(abs(ch._view_x0 - expect_x) < 1e-9,
+       "rubber band: x starts at the box's left data value")
+    ok(abs(ch._view_y0 - expect_t_bot) < 1e-9,
+       "rubber band: y low edge is the box's bottom (cold) Tm")
+    ok(abs(ch._view_y1 - expect_t_top) < 1e-9,
+       "rubber band: y high edge is the box's top (hot) Tm")
+    ok(ch._view_x1 - ch._view_x0 < dx
+       and ch._view_y1 - ch._view_y0 < dy,
+       "rubber-band zoom narrows both axes to the box")
     zx0, zx1, zy0, zy1 = (ch._view_x0, ch._view_x1,
                           ch._view_y0, ch._view_y1)
-    ch._zoom_rect(QRectF(px, py, 2, 2))
+    ch._zoom_rect(QRectF(left, top, 2, 2))
     ok((ch._view_x0, ch._view_x1, ch._view_y0, ch._view_y1) == (zx0, zx1, zy0, zy1),
        "a sub-6 px drag is ignored (no accidental zoom)")
     ch.reset()
