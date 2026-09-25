@@ -652,22 +652,24 @@ def test_design_dialog_adds_candidate():
     dlg = win._design_dlg
     ok(dlg is not None, "Design menu opens the dialog")
     dlg.specs_edit.setPlainText(
-        "# a batch\nchr7:140453136 G>A\nchr16:30391275 T>C\nrs113488022\n"
-        "chr1:1 A>C\n  \nnot-a-variant")
+        "# a batch\nchr7:140453136 G>A\nchr16:30391275 T>Cchr12:8994076 C>A\n"
+        "rs113488022\nchr9:1")
     specs, errors = dlg._specs()
     ok(specs[0] == {"chrom": "chr7", "pos": 140453136, "ref": "G",
                     "alt": "A"}, "chr:pos ref>alt parses to coordinates")
     ok(specs[1]["chrom"] == "chr16" and specs[1]["pos"] == 30391275
        and specs[1]["ref"] == "T" and specs[1]["alt"] == "C",
        "MTHFR-style position parses")
-    ok(specs[2].get("rsid") == "rs113488022", "an rsID line parses")
-    ok(len(errors) == 1 and "not-a-variant" in errors[0],
-       "one bad line is reported, the rest still design")
+    ok(len(specs) == 4 and specs[2]
+       == {"chrom": "chr12", "pos": 8994076, "ref": "C", "alt": "A"},
+       "a lost newline in the paste is split back apart")
+    ok(len(errors) == 1 and "chr9:1" in errors[0],
+       "an incomplete position is reported, the rest still design")
     dlg._on_design()
     dlg._thread.wait()
     app.processEvents()
     ok(len(seen["specs"]) == 4 and seen["base"]["na"] == 0.013,
-       "every valid line was designed as a batch")
+       "every valid variant was designed as a batch")
     ok(dlg.table.rowCount() == 2 and dlg.table.item(0, 0).text().startswith(
         "chr7"), "candidates sorted best-first, origin labelled")
     ok("failed" in dlg.status.text() and "chr1:1" in dlg.status.text(),

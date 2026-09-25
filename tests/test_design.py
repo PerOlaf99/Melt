@@ -96,8 +96,28 @@ def test_parse_variant_spec():
         "chr16:30391275 T>C")
 
 
+def test_split_specs_paste_tolerance():
+    from varmelt import design
+    glued = ("chr16:30391275 T>Cchr12:8994076 C>A\n"
+             "chr15:81046707 C>A,chr17:1028700 A>C "
+             "chr16:31804081 T>G\n  \nchrX:70824010 T>C "
+             "# chr19:8670725 C>A\nchr19:8670725 C>A")
+    toks = design.split_specs(glued)
+    assert toks == ["chr16:30391275 T>C", "chr12:8994076 C>A",
+                    "chr15:81046707 C>A", "chr17:1028700 A>C",
+                    "chr16:31804081 T>G", "chrX:70824010 T>C",
+                    "chr19:8670725 C>A"], toks
+    # every token parses, incl. chrX and the 'chr' suffix after '>'
+    for t in toks:
+        s = design.parse_variant_spec(t)
+        assert s["chrom"].startswith("chr") and s["ref"] != s["alt"]
+    assert not design.split_specs("")
+    assert design.split_specs("some random chatter , not variants") == []
+
+
 if __name__ == "__main__":
     test_design_scores_and_keeps_variant()
     test_design_resolvable_beats_flat()
     test_parse_variant_spec()
+    test_split_specs_paste_tolerance()
     print("design tests OK")

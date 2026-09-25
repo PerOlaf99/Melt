@@ -23,7 +23,8 @@ SPEC_HINT = ("One variant per line.  Use a dbSNP rsID (coordinates are "
              "resolved for the chosen build) or a position, e.g.\n"
              "    rs113488022\n"
              "    chr16:30391275 T>C      (chrom:position ref>mutant)\n"
-             "    chr7:140453136 G>A     run 3+ lines for a batch.")
+             "    chr7:140453136 G>A     run 2+ lines for a batch.\n"
+             "Commas, blank lines or a lost newline (…T>Cchr12:…) are ok.")
 
 
 def _run_design_sync(specs, base):
@@ -147,16 +148,14 @@ class DesignDialog(QDialog):
     # ------------------------------------------------------------ design - #
     def _specs(self):
         from .. import design
+        text = "\n".join(line.split("#", 1)[0]
+                         for line in self.specs_edit.toPlainText().splitlines())
         specs, errors = [], []
-        for no, line in enumerate(self.specs_edit.toPlainText().splitlines(),
-                                  1):
-            line = line.split("#", 1)[0].strip()       # allow # comments
-            if not line:
-                continue
+        for no, chunk in enumerate(design.split_specs(text), 1):
             try:
-                specs.append(design.parse_variant_spec(line))
+                specs.append(design.parse_variant_spec(chunk))
             except ValueError:
-                errors.append(f"entry {no} ({line.strip()})")
+                errors.append(f"entry {no} ({chunk})")
         return specs, errors
 
     def _base(self) -> dict:

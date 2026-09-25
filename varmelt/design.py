@@ -39,6 +39,34 @@ _SPEC_RE = re.compile(
     r"\s*\)?\s*$", re.IGNORECASE)
 
 
+def split_specs(text: str) -> list:
+    """Split a pasted blob into individual variant specs.
+
+    Accepts one per line or several crammed together: blank lines, commas,
+    ``#`` comments and random junk are skipped, and glued variants such as
+    ``chr16:30391275 T>Cchr12:8994076 C>A`` (a lost newline) are separated
+    automatically.  Each returned token still has to pass
+    :func:`parse_variant_spec`; incomplete-but-recognisable tokens (e.g.
+    ``chr16:30391275``) are kept so the dialog can report them.
+    """
+    text = (text or "").replace("\u2192", ">").replace("->", ">")
+    text = re.sub(r"#[^\n]*", " ", text)
+    return [u for u in (m.group(0).strip()
+                        for m in _SPEC_SCAN_RE.finditer(text)) if u]
+
+
+# Find every variant-shaped token in free-form text and let :func:`split_specs`
+# ignore whatever does not look like a variant (the intra-spec space in
+# ``chr16:30391275 T>C`` is kept; a lost newline gluing the ref>alt of one
+# variant to the chromosome of the next is just two matches).
+_SPEC_SCAN_RE = re.compile(
+    r"rs\d+"
+    r"|(?:(?:chr)?[A-Za-z0-9]+)(?:[: ]\s*\d{1,12})"
+    r"(?:\s*[: ]?\s*\(?[ACGT]+>+[ACGT]+(?=[\s,;)]|(?:chr|[0-9]|rs\d)|$)"
+    r"\)?)?",
+    re.IGNORECASE)
+
+
 def parse_variant_spec(text: str) -> dict:
     """Parse one user-typed variant into engine keyword arguments.
 
