@@ -78,7 +78,8 @@ opens a saved project on start.
 - The GC clamp is *not* part of the primer: the reported primer sequences
   are the bare 20-mers (with a 42-base left clamp the forward primer
   starts at amplicon base 43) and no primer or mutation markers clutter
-  the lines.
+  the lines.  The reported **fragment length still counts the clamp's 42
+  real bases**, since the tail is DNA in the melt profile.
 - Zoom & pan the plot: drag a box with the left button to zoom into that
   region, mouse wheel or the +/− buttons zoom around the cursor, shift+drag
   (or middle-drag) pans, and double-click (or *Reset*) shows everything

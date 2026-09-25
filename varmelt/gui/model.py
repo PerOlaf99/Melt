@@ -55,6 +55,17 @@ class Item:
     def clamp_length(self):
         return len(pr.GC_CLAMP) if self.clamp_side() else 0
 
+    def fragment_length(self):
+        """Length of the physical melting fragment: the amplicon plus the
+        GC-clamp bases attached to it (the clamp is real DNA in the melt
+        profile, though it is not part of the reported primers)."""
+        r = self.result
+        if not r:
+            return 0
+        pair = self.pair()
+        amplicon = pair.product_length if pair else len(r["refseq"])
+        return amplicon + self.clamp_length()
+
     def pair(self):
         r = self.result
         if r and r.get("pairs"):

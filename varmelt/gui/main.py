@@ -528,7 +528,7 @@ class MainWindow(QMainWindow):
                 f"{pair.rp_tm_melt:.2f}" if pair and pair.rp_tm_melt else "",
                 pair.product_start if pair else "",
                 pair.product_end if pair else "",
-                pair.product_length if pair else "",
+                it.fragment_length() if it.result else "",
                 f"{pair.avg_tm:.2f}" if pair and pair.avg_tm else "",
                 f"{r.get('delta_area', 0.0):.1f}",
                 pair.clamp_position or "none" if pair else "",
@@ -565,7 +565,7 @@ class MainWindow(QMainWindow):
                 elif it.result:
                     pair = it.pair()
                     if pair:
-                        label += f"  ({pair.product_length} bp"
+                        label += f"  ({it.fragment_length()} bp"
                         if pair.clamp_position:
                             label += f", {pair.clamp_position} clamp"
                         label += ")"
@@ -670,9 +670,10 @@ class MainWindow(QMainWindow):
         pair = it.pair()
 
         kind = it.kind_label()
-        dnalen = r.get("dnalen") or len(r["refseq"])
+        dnalen = it.fragment_length()
         altnote = (f"  ({r['wt_len']} bp wt vs {r['mut_len']} bp mutant, "
-                   f"diff at base {r['mut_idx'] + 1})"
+                   f"diff at base {r['mut_idx'] + 1}"
+                   f"{' plus GC clamp' if it.clamp_side() else ''})"
                    if r.get("paired") else "")
         shape = str(r.get("melting_shape") or "")
         area = float(r.get("delta_area", 0.0) or 0.0)
@@ -707,14 +708,14 @@ class MainWindow(QMainWindow):
                     else ""]
             if pairwise and pair:
                 cols += [pair.product_start, pair.product_end,
-                         pair.product_length,
+                         it.fragment_length(),
                          f"{pair.avg_tm:.2f}" if pair.avg_tm else "",
                          f"{res.get('delta_area', 0.0):.1f}",
                          pair.clamp_position or "none",
                          res.get("melting_shape") or pair.melting_shape
                          or "n/a"]
             else:
-                cols += ["", "", len(res["refseq"]),
+                cols += ["", "", it.fragment_length(),
                          f"{res['ref_mean_tm']:.2f}",
                          "0.0",
                          res.get("clamp", "none"),

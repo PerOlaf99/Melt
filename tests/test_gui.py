@@ -47,6 +47,13 @@ def test_model_compute_roundtrip():
     ok(r["rp"] == _revcomp(SEQ[-20:]), "reverse primer == revcomp of last 20")
     ok(r["pairs"][0].clamp_position == "5'", "seq clamp on 5'")
     ok(r["pairs"][0].fp_seq.startswith("CGCC"), "5' clamp attached to fp")
+    from varmelt.primers import GC_CLAMP
+    ok(p.items[0].fragment_length() == len(SEQ) + len(GC_CLAMP),
+       "fragment length counts the GC-clamp bases")
+    nc = Item(kind="seq", name="noclam", seq=SEQ, clamp="none")
+    nc.compute(p.na)
+    ok(nc.fragment_length() == len(SEQ),
+       "without a clamp the fragment length is the bare amplicon")
 
     rp = p.items[1].result
     ok(rp["paired"] is True, "pair result is paired")
@@ -97,8 +104,8 @@ def test_chart_renders_png():
        and win._csv_row(win.project.items[1])[0] == "frag_pair",
        "csv row for pair")
     row = win._csv_row(win.project.items[1])
-    ok(row[6] == 0 and row[7] == 79 and row[8] == 80,
-       "product start/end/length in csv row")
+    ok(row[6] == 0 and row[7] == 79 and row[8] == 80 + len(GC_CLAMP),
+       "product coords + fragment length incl. the 3' GC clamp in csv")
 
     # different clamp sides still share the amplicon frame: the 5' clamp
     # sticks out to the left (x < 0), the 3' clamp to the right (x >= 80)
@@ -191,7 +198,10 @@ def test_chart_renders_png():
        "amplicon names in the first column")
     ok(win.table.item(0, 1).text() == SEQ[:20],
        "forward primer still the bare 20-mer")
-    ok(win.table.item(1, 7).text() == "80", "pair column: length 80 bp")
+    ok(win.table.item(1, 7).text() == str(80 + len(GC_CLAMP)),
+       "pair column: fragment length includes the 3' GC clamp")
+    ok(win.table.item(0, 7).text() == str(80 + len(GC_CLAMP)),
+       "seq column: fragment length includes the 5' GC clamp")
     ok(float(win.table.item(1, 9).text()) > 0,
        "pair delta area is a positive number")
     ok(win.table.item(1, 11).text() in ("flat/slope ok", "n/a")
