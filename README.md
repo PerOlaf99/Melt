@@ -45,7 +45,29 @@ without external native dependencies.
 python -m venv .venv
 .venv/bin/pip install primer3-py
 # optional: pip install py2bit   (local 2bit genomes)
+# optional, for the desktop GUI: pip install PySide6
 ```
+
+## Desktop GUI
+
+A standalone PySide6/Qt workbench (`python -m varmelt.gui`), WinMelt-style:
+paste one or more DNA amplicons (plain lines or FASTA) — or wildtype/mutant
+pairs — and get the per-base melting map and the primer set (first/last 20
+bases, optional GC clamp) immediately.  `python -m varmelt.gui project.json`
+opens a saved project on start.
+
+- One chart per selected amplicon: the black wildtype melt map with the
+  mutant overlaid dashed red, the GC-clamp oligo shaded grey at the end it
+  occupies, the mutation base marked.
+- Live adjustment: change the salt (Na+) or the selected amplicon's GC
+  clamp and the map, Tm and primer set re-plot right away.
+- File menu: New / Open / Save / Save As (`*.varmelt.json`), export the
+  chart image as PNG and all primer sets as CSV.  Projects store the pasted
+  sequences and settings only; profiles are recomputed from the engine on
+  open, so results are always reproducible.
+- The paste-a-sequence analysis matches the CLI/web `analyze_sequence`
+  mode: names ending `_wt`/`_mut` (or `_ref`/`_alt`) are plotted together
+  as a wildtype/mutant pair aligned at their first differing base.
 
 ## Usage
 
@@ -220,6 +242,7 @@ dynamic-programming module anymore.
 .venv/bin/python tests/test_fallback.py  # geometry / clamp / fallback design
 .venv/bin/python tests/test_inpcr.py     # seed-and-extend / specificity scan
 .venv/bin/python tests/test_sequence.py  # pasted-amplicon (primers + profiles)
+QT_QPA_PLATFORM=offscreen .venv/bin/python tests/test_gui.py   # desktop GUI
 ```
 
 ## Differences from the original
