@@ -301,10 +301,16 @@ class MainWindow(QMainWindow):
         if dlg is None:
             dlg = DesignDialog(self)
             dlg.candidate.connect(self._add_designed)
+            dlg.candidates.connect(self._add_designed_many)
             self._design_dlg = dlg
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()
+
+    def _add_designed_many(self, cands):
+        """Append the best fragment of every designed variant."""
+        for cand in cands:
+            self._add_designed(cand)
 
     def _add_designed(self, cand):
         """Append a designed candidate to the project as a normal pair item."""

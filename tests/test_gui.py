@@ -632,49 +632,61 @@ def test_design_dialog_adds_candidate():
     app = QApplication.instance() or QApplication([])
     wt = BRAF_FLAT_VS_SLOPED
     mut = wt[:12] + "A" + wt[13:]
-    cand = dmod.Candidate(
-        name="chr7:140453136 T>G — 74 bp fragment, flat/slope ok",
-        chrom="chr7", pos=140453136, rsid="rs113488022", ref="T", alt="G",
+    mk = lambda who, key, score: dmod.Candidate(
+        name=f"{key} — 74 bp fragment, flat/slope ok",
+        chrom=key.split(":")[0], pos=int(key.split(":")[1].split()[0]),
+        rsid="", ref=key.split()[1][0], alt=key.split()[1][2],
         fp=wt[:20], rp=wt[-20:], ps=0, pe=len(wt) - 1,
         product_len=len(wt), fragment_len=len(wt) + 42,
         ft=60.0, rt=61.0, clamp="3'",
         shape="flat/slope ok", snps_3prime="none",
-        delta_area=12.4, wt_amp=wt, mut_amp=mut, score=95)
-    result = dmod.DesignResult([cand], "chr7", 140453136, "T", "G",
-                               "rs113488022", "hg38", 0, len(wt) - 1,
-                               False)
-    routed = {}
-    gd._run_design_sync = lambda params: (routed.update(params) or result)
+        delta_area=12.4, wt_amp=wt, mut_amp=mut, score=score)
+    a = mk(0, "chr7:140453136 G>A", 95)
+    b = mk(1, "chr16:30391275 T>C", 88)
+    seen = {}
+    gd._run_design_sync = lambda specs, base: (
+        seen.update(specs=specs, base=base) or ([a, b], ["chr1:1 A>C: boom"]))
 
     win = MainWindow()
     win._open_design()
     dlg = win._design_dlg
     ok(dlg is not None, "Design menu opens the dialog")
-    ok(dlg.chrom_edit.isEnabled(), "manual fields enabled without an rsID")
-    dlg.rsid_edit.setText("rs113488022")
-    app.processEvents()
-    ok(not dlg.chrom_edit.isEnabled() and not dlg.ref_edit.isEnabled(),
-       "typing an rsID grays out the manual position row")
-    dlg.rsid_edit.clear()
-    app.processEvents()
-    ok(dlg.design_btn.isEnabled(), "Design button ready")
+    dlg.specs_edit.setPlainText(
+        "# a batch\nchr7:140453136 G>A\nchr16:30391275 T>C\nrs113488022\n"
+        "chr1:1 A>C\n  \nnot-a-variant")
+    specs, errors = dlg._specs()
+    ok(specs[0] == {"chrom": "chr7", "pos": 140453136, "ref": "G",
+                    "alt": "A"}, "chr:pos ref>alt parses to coordinates")
+    ok(specs[1]["chrom"] == "chr16" and specs[1]["pos"] == 30391275
+       and specs[1]["ref"] == "T" and specs[1]["alt"] == "C",
+       "MTHFR-style position parses")
+    ok(specs[2].get("rsid") == "rs113488022", "an rsID line parses")
+    ok(len(errors) == 1 and "not-a-variant" in errors[0],
+       "one bad line is reported, the rest still design")
     dlg._on_design()
     dlg._thread.wait()
     app.processEvents()
-    ok(len(routed) >= 2 and routed["na"] == 0.013, "form params built")
-    ok(dlg.table.rowCount() == 1 and dlg.table.item(0, 0).text() == "95",
-       "candidate row is populated")
+    ok(len(seen["specs"]) == 4 and seen["base"]["na"] == 0.013,
+       "every valid line was designed as a batch")
+    ok(dlg.table.rowCount() == 2 and dlg.table.item(0, 0).text().startswith(
+        "chr7"), "candidates sorted best-first, origin labelled")
+    ok("failed" in dlg.status.text() and "chr1:1" in dlg.status.text(),
+       "a per-variant failure shows in the batch status")
     dlg.table.selectRow(0)
     app.processEvents()
     ok(dlg.add_btn.isEnabled(), "Add is enabled once a row is selected")
     dlg._add_selected()
     app.processEvents()
-    ok(len(win.project.items) == 1, "add puts the candidate in the project")
-    it = win.project.items[0]
-    ok(it.kind == "pair" and it.result and it.result.get("paired"),
-       "added item computes as a pair")
+    ok(len(win.project.items) == 1 and win.project.items[0].result
+       and win.project.items[0].result.get("paired"),
+       "Add selected puts the candidate in the project")
+    dlg._add_best_each()
+    app.processEvents()
+    ok(len(win.project.items) == 3,
+       "Add best of each variant appends every variant's top fragment")
+    it = win.project.items[-1]
     ok(it.clamp_side() == "3'", "the designed clamp side is honoured")
-    ok(len(win.chart._datasets) >= 1, "the fragment is plotted")
+    ok(len(win.chart._datasets) >= 1, "the fragments are plotted")
     dlg.close()
 
 

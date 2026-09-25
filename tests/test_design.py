@@ -65,7 +65,39 @@ def test_design_resolvable_beats_flat():
     assert top.delta_area > 5.0, "the V600E difference is visible (area>5)"
 
 
+def test_parse_variant_spec():
+    from varmelt import design
+    for text, want in [
+        ("rs113488022", {"rsid": "rs113488022"}),
+        ("RS113488022 ", {"rsid": "rs113488022"}),
+        ("chr16:30391275 T>C",
+         {"chrom": "chr16", "pos": 30391275, "ref": "T", "alt": "C"}),
+        ("chr16:30391275T>C",
+         {"chrom": "chr16", "pos": 30391275, "ref": "T", "alt": "C"}),
+        ("chr16:30391275 T->C",
+         {"chrom": "chr16", "pos": 30391275, "ref": "T", "alt": "C"}),
+        ("(chr7:140453136 T>A)",
+         {"chrom": "chr7", "pos": 140453136, "ref": "T", "alt": "A"}),
+        ("16:30391275 T>C",
+         {"chrom": "chr16", "pos": 30391275, "ref": "T", "alt": "C"}),
+    ]:
+        assert design.parse_variant_spec(text) == want, text
+    # a comment suffix is allowed when the dialog strips it on the line
+    for bad in ["", "   ", "T>C", "chr16:30391275", "chr16 30391275 T/C",
+                "chr16:30391275 T>C G>A", "not a variant"]:
+        try:
+            design.parse_variant_spec(bad)
+        except ValueError:
+            continue
+        assert False, f"expected ValueError for {bad!r}"
+    assert design.spec_label({"rsid": "rs113488022"}) == "rs113488022"
+    assert design.spec_label({"chrom": "chr16", "pos": 30391275,
+                              "ref": "T", "alt": "C"}) == (
+        "chr16:30391275 T>C")
+
+
 if __name__ == "__main__":
     test_design_scores_and_keeps_variant()
     test_design_resolvable_beats_flat()
+    test_parse_variant_spec()
     print("design tests OK")

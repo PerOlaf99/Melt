@@ -105,11 +105,14 @@ opens a saved project on start.
   as a wildtype/mutant pair aligned at their first differing base.
 - The **Design → Fragment design…** dialog runs the engine's automated
   design (Primer3 over the product-size windows, dbSNP-filtered primer 3'
-  ends, clean-slope GC-clamp side) on a background thread for a dbSNP rsID
-  or a chromosome position, ranks the surviving candidates by a 0-100 score
-  (dip-free, wt/mutant resolvability, primer Tm, fragment length, dbSNP)
-  and "Add to project" drops the chosen fragment in as an ordinary
-  wildtype/mutant pair.
+  ends, clean-slope GC-clamp side) on a background thread.  Type *one
+  variant per line* — a dbSNP rsID or a compact position
+  (``chr:position ref>alt``, e.g. ``chr16:30391275 T>C``) — for the chosen
+  genome build; several lines run as a batch and each variant's best
+  fragment can be added at once ("Add best of each variant").  Candidates
+  are ranked by a 0-100 score (dip-free, wt/mutant resolvability, primer
+  Tm, fragment length, dbSNP) and "Add selected" drops a fragment in as an
+  ordinary wildtype/mutant pair.
 
 ## Usage
 

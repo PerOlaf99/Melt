@@ -18,6 +18,7 @@ scans.
 """
 
 import math
+import re
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -27,6 +28,52 @@ from . import reference as refmod
 from .cli import render_variant
 
 WINDOW_DEFAULT = 500
+
+_SPEC_RE = re.compile(
+    r"^\s*(?:\(?\s*)?"
+    r"(?P<chrom>chr[\w]+|[\w]+)\s*[: ]"
+    r"(?P<pos>\d{1,12})\s*"
+    r"(?:\(?\s*)?"
+    r"(?P<ref>[ACGT]+)\s*>+\s*"
+    r"(?P<alt>[ACGT]+)"
+    r"\s*\)?\s*$", re.IGNORECASE)
+
+
+def parse_variant_spec(text: str) -> dict:
+    """Parse one user-typed variant into engine keyword arguments.
+
+    Accepted shapes (spaces, ``:``, ``>`` vs ``->``/``\u2192`` and optional
+    surrounding parentheses are tolerated):
+
+    - ``rs113488022``                         (dbSNP rsID)
+    - ``chr16:30391275 T>C``                  (chrom:position ref>alt)
+    - ``chr16:30391275T>C`` / ``16 30391275 T>C``
+
+    Raises ``ValueError`` with a message naming the offending text.
+    """
+    t = (text or "").strip()
+    if not t:
+        raise ValueError("empty variant")
+    t = t.replace("\u2192", ">").replace("->", ">")
+    rsm = re.match(r"^\s*(rs\d+)\s*$", t, re.IGNORECASE)
+    if rsm:
+        return {"rsid": rsm.group(1).lower()}
+    m = _SPEC_RE.match(t)
+    if not m:
+        raise ValueError(
+            f"cannot parse {text!r} -- use 'chr:position ref>alt' "
+            "or an rsID, e.g. 'chr16:30391275 T>C'")
+    chrom = m.group("chrom")
+    if not chrom.lower().startswith("chr"):
+        chrom = "chr" + chrom
+    return {"chrom": chrom, "pos": int(m.group("pos")),
+            "ref": m.group("ref").upper(), "alt": m.group("alt").upper()}
+
+
+def spec_label(spec: dict) -> str:
+    if spec.get("rsid"):
+        return str(spec["rsid"])
+    return f"{spec['chrom']}:{spec['pos']} {spec['ref']}>{spec['alt']}"
 
 
 @dataclass
@@ -115,6 +162,12 @@ def design_variant(rsid: Optional[str] = None, chrom: str = "ref",
     and fragment-length checks); the reason is in ``note``.
     """
     a = g.normalise_assembly(genome) if not refseq_override else genome
+    if rsid and refseq_override is None and ref in ("-", ""):
+        # an rsID carries the coordinates: resolve them for the build
+        # (mirrors the CLI; a failure raises with dbSNP's message).
+        from . import dbsnp
+        v = dbsnp.homologue(rsid, assembly=a)
+        chrom, pos, ref, alt = v["chrom"], v["pos"], v["ref"], v["alt"]
     if refseq_override is not None:
         refseq = refseq_override.upper()
         start, end = 0, len(refseq)
