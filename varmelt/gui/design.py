@@ -27,18 +27,22 @@ SPEC_HINT = ("One variant per line.  Use a dbSNP rsID (coordinates are "
              "Commas, blank lines or a lost newline (…T>Cchr12:…) are ok.")
 
 
-def _run_design_sync(specs, base):
+def _run_design_sync(specs, base, progress=None):
     """Design every spec and return (candidates, per-spec errors).
 
     Runs on the worker thread; a failing variant never kills the rest.
+    *progress* is an optional ``callable(i, n)`` invoked after each variant.
     """
     from .. import design
     out, errors = [], []
-    for spec in specs:
+    n = len(specs)
+    for i, spec in enumerate(specs, 1):
         try:
             out += design.design_variant(**spec, **base).candidates
         except Exception as exc:                            # noqa: BLE001
             errors.append(f"{design.spec_label(spec)}: {exc}")
+        if progress is not None:
+            progress(i, n)
     out.sort(key=lambda c: (-c.score, c.fragment_len))
     return out, errors
 
@@ -46,6 +50,7 @@ def _run_design_sync(specs, base):
 class _DesignThread(QThread):
     done = Signal(object, object)
     failed = Signal(str)
+    progress = Signal(int, int)
 
     def __init__(self, specs, base, parent=None):
         super().__init__(parent)
@@ -53,10 +58,14 @@ class _DesignThread(QThread):
 
     def run(self):
         try:
-            cands, errors = _run_design_sync(self._specs, self._base)
+            cands, errors = _run_design_sync(
+                self._specs, self._base, progress=self._emit_progress)
             self.done.emit(cands, errors)
         except Exception as exc:                            # noqa: BLE001
             self.failed.emit(str(exc) or exc.__class__.__name__)
+
+    def _emit_progress(self, i, n):
+        self.progress.emit(i, n)
 
 
 class DesignDialog(QDialog):
@@ -175,7 +184,11 @@ class DesignDialog(QDialog):
         self._thread = _DesignThread(specs, self._base(), self)
         self._thread.done.connect(self._on_result)
         self._thread.failed.connect(self._on_error)
+        self._thread.progress.connect(self._on_progress)
         self._thread.start()
+
+    def _on_progress(self, i, n):
+        self.status.setText(f"designing variant {i}/{n} ...")
 
     def _set_busy(self, busy: bool, msg: str = ""):
         self.status.setText(msg)

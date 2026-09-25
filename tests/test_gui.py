@@ -644,7 +644,7 @@ def test_design_dialog_adds_candidate():
     a = mk(0, "chr7:140453136 G>A", 95)
     b = mk(1, "chr16:30391275 T>C", 88)
     seen = {}
-    gd._run_design_sync = lambda specs, base: (
+    gd._run_design_sync = lambda specs, base, progress=None: (
         seen.update(specs=specs, base=base) or ([a, b], ["chr1:1 A>C: boom"]))
 
     win = MainWindow()

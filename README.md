@@ -112,7 +112,10 @@ opens a saved project on start.
   fragment can be added at once ("Add best of each variant").  Candidates
   are ranked by a 0-100 score (dip-free, wt/mutant resolvability, primer
   Tm, fragment length, dbSNP) and "Add selected" drops a fragment in as an
-  ordinary wildtype/mutant pair.
+  ordinary wildtype/mutant pair.  The build matters: **hg19 is the same
+  assembly as GRCh37**; a variant list called against GRCh37 must run with
+  the hg19 build (a wrong build shows up as "ref allele … does not match
+  the reference base(s) …").
 
 ## Usage
 
