@@ -50,6 +50,7 @@ def split_specs(text: str) -> list:
     ``chr16:30391275``) are kept so the dialog can report them.
     """
     text = (text or "").replace("\u2192", ">").replace("->", ">")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = re.sub(r"#[^\n]*", " ", text)
     return [u for u in (m.group(0).strip()
                         for m in _SPEC_SCAN_RE.finditer(text)) if u]

@@ -10,10 +10,10 @@ ordinary wt/mut ``Item``, reusing the chart/info/primer-table rendering.
 """
 
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtWidgets import (QComboBox, QDialog, QDoubleSpinBox, QFormLayout,
-                               QFrame, QHBoxLayout, QLabel, QPlainTextEdit,
-                               QPushButton, QSpinBox, QTableWidget,
-                               QTableWidgetItem, QVBoxLayout)
+from PySide6.QtWidgets import (QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
+                               QFormLayout, QFrame, QHBoxLayout, QLabel,
+                               QPlainTextEdit, QPushButton, QSpinBox,
+                               QTableWidget, QTableWidgetItem, QVBoxLayout)
 
 SCORE_NOTE = ("Score 0-100: dip-free (45) + resolvable wt/mut difference "
               "(30) + primer Tm in range (10) + short fragment (10) "
@@ -88,6 +88,22 @@ class DesignDialog(QDialog):
         self.specs_edit.setFixedHeight(92)
         form.addRow("Variant(s)", self.specs_edit)
 
+        import_row = QHBoxLayout()
+        self.import_btn = QPushButton("Import variant list\u2026")
+        self.import_btn.setToolTip(
+            "read variants from a spreadsheet (.ods / .xlsx), a delimited "
+            "text file (.csv/.tsv/.txt) or a .vcf -- Windows and Mac line "
+            "endings are detected automatically; CHROM/POS/REF/ALT, "
+            "GENOMIC_CHANGE and plain variant columns are recognised")
+        self.import_btn.clicked.connect(self._on_import)
+        set_build_btn = QPushButton("Set build hg19")
+        set_build_btn.setToolTip("your list is called against GRCh37 == hg19")
+        set_build_btn.clicked.connect(
+            lambda: self.genome_combo.setCurrentText("hg19"))
+        import_row.addWidget(self.import_btn)
+        import_row.addWidget(set_build_btn)
+        import_row.addStretch(1)
+
         self.genome_combo = QComboBox()
         self.genome_combo.addItems(["hg38", "hg19"])
         self.genome_combo.setToolTip(
@@ -147,6 +163,7 @@ class DesignDialog(QDialog):
 
         body = QVBoxLayout(self)
         body.addLayout(form)
+        body.addLayout(import_row)
         body.addWidget(self.hint)
         body.addLayout(btns)
         body.addWidget(self.status)
@@ -155,6 +172,36 @@ class DesignDialog(QDialog):
         body.addLayout(add_row)
 
     # ------------------------------------------------------------ design - #
+    def _on_import(self):
+        import os
+
+        from .. import variantfiles
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import variant list", "",
+            "Variant lists (*.ods *.xlsx *.csv *.tsv *.txt *.vcf)"
+            ";;Spreadsheets (*.ods *.xlsx)"
+            ";;Text tables (*.csv *.tsv *.txt)"
+            ";;VCF (*.vcf)"
+            ";;All files (*)")
+        if not path:
+            return
+        try:
+            specs = variantfiles.parse_variant_file(path)
+        except (ValueError, OSError) as exc:
+            self.status.setText(f'<font color="#a00">import failed: '
+                                f'{exc}</font>')
+            return
+        if not specs:
+            self.status.setText(
+                '<font color="#a00">no variants found in that file</font>')
+            return
+        text = self.specs_edit.toPlainText().strip()
+        self.specs_edit.setPlainText(
+            (text + "\n" if text else "") + "\n".join(specs))
+        self.status.setText(
+            f"imported {len(specs)} variant(s) from "
+            f"{os.path.basename(path)}")
+
     def _specs(self):
         from .. import design
         text = "\n".join(line.split("#", 1)[0]

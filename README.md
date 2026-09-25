@@ -115,7 +115,12 @@ opens a saved project on start.
   ordinary wildtype/mutant pair.  The build matters: **hg19 is the same
   assembly as GRCh37**; a variant list called against GRCh37 must run with
   the hg19 build (a wrong build shows up as "ref allele … does not match
-  the reference base(s) …").
+  the reference base(s) …").  An **Import variant list…** button reads whole
+  files instead of pasting: spreadsheets (``.ods`` / ``.xlsx``), delimited
+  text (``.csv`` / ``.tsv`` / ``.txt``, with Windows CRLF and Mac CR line
+  endings auto-detected) and ``.vcf``, recognising CHROM/POS/REF/ALT
+  columns, PCGR ``GENOMIC_CHANGE`` columns and columns already in the
+  ``chr:pos ref>alt`` shape.
 
 ## Usage
 

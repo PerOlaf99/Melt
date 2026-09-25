@@ -692,6 +692,34 @@ def test_design_dialog_adds_candidate():
     dlg.close()
 
 
+def test_design_import_list():
+    """Import-list appends the file's variants into the dialog box."""
+    from PySide6.QtWidgets import QApplication, QFileDialog
+    from varmelt.gui.main import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    with tempfile.TemporaryDirectory() as d:
+        lst = os.path.join(d, "ops.csv")
+        with open(lst, "w", newline="") as fh:
+            fh.write("CHROM,POS,REF,ALT\r\n7,140453136,T,A\r\n"
+                     "16,30391275,G,A\r\n")
+        orig = QFileDialog.getOpenFileName
+        QFileDialog.getOpenFileName = staticmethod(
+            lambda *a, **k: (lst, "Variant lists (*.ods *.xlsx *.csv)"))
+        win = MainWindow()
+        win._open_design()
+        dlg = win._design_dlg
+        try:
+            dlg._on_import()
+            text = dlg.specs_edit.toPlainText()
+            ok("chr7:140453136 T>A" in text and "chr16:30391275 G>A" in text
+               and "imported 2 variant(s)" in dlg.status.text(),
+               "Import-list reads a Windows CSV into the box")
+        finally:
+            QFileDialog.getOpenFileName = orig
+        dlg.close()
+
+
 if __name__ == "__main__":
     test_model_compute_roundtrip()
     test_project_schema()
@@ -703,6 +731,7 @@ if __name__ == "__main__":
     test_example_menu_braf_v600e_and_toggle()
     test_example_menu_braf_silent_vs_v600e()
     test_design_dialog_adds_candidate()
+    test_design_import_list()
     test_buttons_and_table()
     print("\n" + ("ALL GUI TESTS PASSED" if failures == 0
                   else f"{failures} FAILURE(S)"))
