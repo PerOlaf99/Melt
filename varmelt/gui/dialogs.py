@@ -149,7 +149,10 @@ class EditItemDialog(QDialog):
                           "Change any base(s) here: the edited copy is "
                           "treated as the <b>mutant</b> of the original "
                           "sequence and the item becomes a wildtype/mutant "
-                          "pair (difference plotted as the variant).  Leave "
+                          "pair (difference plotted as the variant).  "
+                          "Alternatively paste two FASTA records "
+                          "<b>&gt;wt</b>&nbsp;/&nbsp;<b>&gt;mut</b> to "
+                          "replace the item with exactly that pair.  Leave "
                           "it unchanged to keep a single amplicon.</span>")
         hint.setWordWrap(True)
         form.addRow("", hint)

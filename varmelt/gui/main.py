@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox,
                                QSplitter, QTableWidget, QTableWidgetItem,
                                QVBoxLayout, QWidget)
 
-from .. import cli
+from .. import cli, webapp
 from .dialogs import AddPairDialog, AddSequenceDialog, EditItemDialog
 from .model import CLAMP_SIDES, Item, Project
 from .plot import MeltChart, PALETTE
@@ -287,7 +287,24 @@ class MainWindow(QMainWindow):
                 it.wt, it.mut = wt, mut
                 it.seq = ""
             else:
-                seq = self._normalise_or_warn(dlg.sequences()[1])
+                raw = dlg.sequences()[1]
+                records = (webapp._parse_fasta(raw)
+                           if raw.lstrip().startswith(">") else [])
+                parsed = webapp._pair_sequences(records)
+                if len(parsed) == 1 and parsed[0]["kind"] == "pair":
+                    # explicit >wt/>mut records in the single field replace
+                    # the item with that pair instead of concatenating DNA
+                    was = it.name
+                    it.kind = "pair"
+                    it.wt, it.mut = parsed[0]["wt"], parsed[0]["mut"]
+                    it.seq = ""
+                    dlg_name = (dlg.name_edit.text() or "").strip()
+                    if dlg_name and dlg_name != was:
+                        it.name = dlg_name
+                    else:
+                        it.name = parsed[0]["name"] or it.name
+                    return True
+                seq = self._normalise_or_warn(raw)
                 if not seq:
                     raise ValueError("sequence may not be empty")
                 if it.kind == "seq":

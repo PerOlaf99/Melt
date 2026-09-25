@@ -249,6 +249,45 @@ def test_edit_duplicate_delete():
        "remaining items intact after delete")
 
 
+def test_edit_field_bare_headers():
+    """Pasting explicit >wt/>mut records into the edit dialog's single
+    field replaces the item with exactly that pair.  (Regression: the two
+    DNA strings used to be header-stripped and concatenated into one bogus
+    mutant, giving an 'identical sequences' error.)"""
+    from PySide6.QtWidgets import QApplication
+    from varmelt.gui.dialogs import EditItemDialog
+    from varmelt.gui.main import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    win = MainWindow()
+    it = Item(kind="seq", name="frag", seq=SEQ, clamp="5'")
+    win.project.add(it)
+    win._refresh_list()
+    win.list.setCurrentRow(0)
+    win._recompute_current()
+
+    dlg = EditItemDialog(win, it)
+    dlg.seq_edit.setPlainText(">wt\n" + SEQ + "\n>mut\n" + MUT)
+    ok(win._apply_edit(it, dlg), "edit keeps explicit wt/mut")
+    ok(it.kind == "pair" and it.wt == SEQ and it.mut == MUT,
+       "edit field pair: wt/mut kept, no concatenation")
+    ok(it.name == "wt/mut", "edit field pair: name from the records")
+    win._recompute_current()
+    ok(not it.error, "edit field pair computes cleanly")
+
+    # a single-sequence edit still follows the old wildtype->mutant rule
+    it2 = Item(kind="seq", name="frag2", seq=SEQ, clamp="5'")
+    win.project.add(it2)
+    win._refresh_list()
+    win.list.setCurrentRow(1)
+    win._recompute_current()
+    dlg2 = EditItemDialog(win, it2)
+    dlg2.seq_edit.setPlainText(MUT)
+    ok(win._apply_edit(it2, dlg2), "plain edit applies")
+    ok(it2.kind == "pair" and it2.wt == SEQ and it2.mut == MUT,
+       "plain edit keeps original wt, edited copy as mutant")
+
+
 def test_project_schema():
     d = Project(na=0.05).to_dict()
     ok(d["app"] == "varmelt melt" and d["version"] == 1,
@@ -337,6 +376,7 @@ if __name__ == "__main__":
     test_model_compute_roundtrip()
     test_project_schema()
     test_edit_duplicate_delete()
+    test_edit_field_bare_headers()
     test_chart_renders_png()
     test_buttons_and_table()
     print("\n" + ("ALL GUI TESTS PASSED" if failures == 0
