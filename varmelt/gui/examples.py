@@ -32,3 +32,23 @@ def braf_flat_vs_sloped_items():
         Item(kind="seq", name="BRAF sloped (3' clamp)",
              seq=BRAF_FLAT_VS_SLOPED, clamp="3'"),
     ]
+
+
+# The canonical BRAF V600E change is c.1799T>A: codon GTG (Val600) becomes
+# GAG (Glu600) by a single T->A, here the middle base of the GTG codon at
+# index 80 of the 127 bp amplicon.  The substitution sits amongst the flat
+# region of the fragment, so the wt/mut pair is best inspected under the
+# same clamps as the illustration above.
+_V600E_CODON = "GTGAAATCTC"
+
+
+def braf_v600e_items():
+    """A wt/mut Item for the BRAF V600E (c.1799T>A) substitution."""
+    from .model import Item
+    wt = BRAF_FLAT_VS_SLOPED
+    i = wt.index(_V600E_CODON) + 1       # middle base of the GTG codon
+    mut = wt[:i] + "A" + wt[i + 1:]
+    return [
+        Item(kind="pair", name="BRAF V600E wt/mut pair", wt=wt, mut=mut,
+             clamp="5'"),
+    ]

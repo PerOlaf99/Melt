@@ -212,6 +212,8 @@ class MainWindow(QMainWindow):
         m_exp = self.menuBar().addMenu("&Examples")
         self._add_action(m_exp, "BRAF 127 bp flat vs sloped",
                          self._load_example_braf)
+        self._add_action(m_exp, "BRAF V600E wt/mut pair",
+                         self._load_example_braf_v600e)
 
         m_help = self.menuBar().addMenu("&Help")
         self._add_action(m_help, "&About", self._about)
@@ -250,11 +252,9 @@ class MainWindow(QMainWindow):
             self._refresh_list()
             self._select_index(len(self.project.items) - 1)
 
-    def _load_example_braf(self):
-        """Add the BRAF flat-vs-sloped illustration (both clamp sides)."""
-        from .examples import braf_flat_vs_sloped_items
-        items = braf_flat_vs_sloped_items()
-        for it in items:
+    def _load_example(self, builder):
+        """Add and compute each item produced by ``builder``."""
+        for it in builder():
             self.project.add(it)
             it.compute(self.project.na)
         self._refresh_list()
@@ -262,9 +262,22 @@ class MainWindow(QMainWindow):
         self._render_table()
         self._select_index(len(self.project.items) - 1)
         self._render_info(self._current_item())
+
+    def _load_example_braf(self):
+        """Add the BRAF flat-vs-sloped illustration (both clamp sides)."""
+        from .examples import braf_flat_vs_sloped_items
+        self._load_example(braf_flat_vs_sloped_items)
         self.statusBar().showMessage(
             "BRAF 127 bp: flat plateau under the 5' clamp vs the sloped "
             "3'-clamped profile (Pichler et al., PMID 15948220)", 6000)
+
+    def _load_example_braf_v600e(self):
+        """Add the BRAF V600E (c.1799T>A) wt/mut pair."""
+        from .examples import braf_v600e_items
+        self._load_example(braf_v600e_items)
+        self.statusBar().showMessage(
+            "BRAF V600E: GTG -> GAG (c.1799T>A) on the 127 bp amplicon "
+            "(flip the GC clamp to compare shapes)", 6000)
 
     def _rename_item(self):
         it = self._current_item()
@@ -613,7 +626,7 @@ class MainWindow(QMainWindow):
         it = item.data(Qt.UserRole)
         if it is None:
             return
-        new_state = bool(int(item.checkState()))   # Checked/Unchecked->bool
+        new_state = item.checkState() != Qt.Unchecked  # enum, not an int
         if bool(it.plot) != new_state:
             it.plot = new_state
             self._render_plots()

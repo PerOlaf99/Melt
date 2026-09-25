@@ -540,6 +540,44 @@ def test_example_menu_braf_flat_vs_sloped():
        "3' clamp: the same DNA is sloped, no long plateau")
 
 
+def test_example_menu_braf_v600e_and_toggle():
+    from varmelt.gui.examples import BRAF_FLAT_VS_SLOPED, braf_v600e_items
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+    from varmelt.gui.main import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    items = braf_v600e_items()
+    ok(len(items) == 1 and items[0].kind == "pair", "V600E ships as a pair")
+    it = items[0]
+    ok(len(it.wt) == len(it.mut) == 127, "V600E pair is two 127 bp strands")
+    diffs = [i for i, (a, b) in enumerate(zip(it.wt, it.mut)) if a != b]
+    ok(len(diffs) == 1 and it.wt[diffs[0] - 1:diffs[0] + 3] == "GTG"
+       and it.mut[diffs[0] - 1:diffs[0] + 3] == "GAG",
+       "single T>A turns the GTG codon into GAG (c.1799T>A, V600E)")
+    ok(BRAF_FLAT_VS_SLOPED[diffs[0]] == "T", "the changed base is a T")
+
+    win = MainWindow()
+    win._load_example_braf()
+    win._load_example_braf_v600e()
+    app.processEvents()
+    ok(len(win.project.items) == 3, "both examples load together")
+    pair = win.project.items[-1]
+    ok(pair.result and pair.result.get("paired"), "V600E pair computes")
+    ok(pair.mark_idx() == 80, "V600E base is the wt/mut diff at index 80")
+
+    # toggle on/off must work (regression: PySide6 checkState is an enum,
+    # not an int, so bool(int(checkState())) raised on every toggle)
+    n = len(win.chart._datasets)
+    win.list.item(0).setCheckState(Qt.Unchecked)
+    app.processEvents()
+    ok(len(win.chart._datasets) == n - 1,
+       "unticking a row hides that chart")
+    win.list.item(0).setCheckState(Qt.Checked)
+    app.processEvents()
+    ok(len(win.chart._datasets) == n, "re-ticking restores the chart")
+
+
 if __name__ == "__main__":
     test_model_compute_roundtrip()
     test_project_schema()
