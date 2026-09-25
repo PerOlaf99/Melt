@@ -65,6 +65,30 @@ def test_design_resolvable_beats_flat():
     assert top.delta_area > 5.0, "the V600E difference is visible (area>5)"
 
 
+def test_design_rejects_wrong_ref_and_identical_alleles():
+    from varmelt import design
+    refseq = _window()
+    pos = 100 + 80                     # the V600E base (a T)
+    assert refseq[pos] == "T"
+    try:
+        design.design_variant(chrom="chr7", pos=pos, ref="A", alt="C",
+                              refseq_override=refseq, with_dbsnp=False,
+                              max_frag=240, na=0.013)
+    except ValueError as exc:
+        assert "ref allele A does not match" in str(exc) \
+            and "base(s) 'T'" in str(exc), str(exc)
+    else:
+        assert False, "a ref allele that is not the reference base must fail"
+    try:
+        design.design_variant(chrom="chr7", pos=pos, ref="T", alt="T",
+                              refseq_override=refseq, with_dbsnp=False,
+                              max_frag=240, na=0.013)
+    except ValueError as exc:
+        assert "equals the reference allele" in str(exc), str(exc)
+    else:
+        assert False, "alt == ref must fail"
+
+
 def test_parse_variant_spec():
     from varmelt import design
     for text, want in [
@@ -118,6 +142,7 @@ def test_split_specs_paste_tolerance():
 if __name__ == "__main__":
     test_design_scores_and_keeps_variant()
     test_design_resolvable_beats_flat()
+    test_design_rejects_wrong_ref_and_identical_alleles()
     test_parse_variant_spec()
     test_split_specs_paste_tolerance()
     print("design tests OK")

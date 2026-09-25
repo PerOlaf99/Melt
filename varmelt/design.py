@@ -206,13 +206,26 @@ def design_variant(rsid: Optional[str] = None, chrom: str = "ref",
         refseq = g.fetch_sequence(a, chrom_n, start, end, local_2bit)
         if len(refseq) < window:
             raise ValueError(f"window {window} exceeds chromosome boundary")
-        idx = pos - start
-        if not (0 <= idx < len(refseq)):
-            raise ValueError("variant position outside fetched window")
+    idx = pos - start
+    if not (0 <= idx < len(refseq)):
+        raise ValueError("variant position outside fetched window")
 
-    if ref == "-" or alpha(ref) == "":
-        raise ValueError("reference allele is empty")
-    alt = alt if alpha(alt) else ref
+    ref = (ref or "").upper()
+    if not ref or alpha(ref) != ref:
+        raise ValueError("reference allele is empty or not DNA (A/C/G/T)")
+    actual = refseq[idx:idx + len(ref)]
+    if actual != ref:
+        raise ValueError(
+            f"ref allele {ref} does not match the reference base(s) "
+            f"'{actual}' at {chrom_n}:{pos} of build {a or 'supplied window'}; "
+            "check that the genome build matches your coordinates and that "
+            "the ref allele is correct")
+    alt = (alt or "").upper()
+    if not alt or alpha(alt) != alt:
+        raise ValueError("variant allele is empty or not DNA (A/C/G/T)")
+    if alt == ref:
+        raise ValueError("variant allele equals the reference allele")
+
     altseq = render_variant(alt, ref, alt, idx, refseq)
     indel = len(refseq) - len(altseq)
 

@@ -308,20 +308,33 @@ class MainWindow(QMainWindow):
         dlg.activateWindow()
 
     def _add_designed_many(self, cands):
-        """Append the best fragment of every designed variant."""
-        for cand in cands:
-            self._add_designed(cand)
+        """Append the best fragment of every designed variant.
 
-    def _add_designed(self, cand):
+        Failures never block the rest: each bad candidate is noted and one
+        summary warning is shown at the end instead of a modal box per item.
+        """
+        bad = [name for name in
+               (self._add_designed(cand, quiet=True) for cand in cands)
+               if name]
+        if bad:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self, "varmelt melt",
+                "Could not add these designed fragments:\n\n"
+                + "\n".join(f"- {b}" for b in bad))
+
+    def _add_designed(self, cand, quiet: bool = False):
         """Append a designed candidate to the project as a normal pair item."""
         from .model import Item
         it = Item(kind="pair", name=cand.name, wt=cand.wt_amp,
                   mut=cand.mut_amp, clamp=cand.clamp or "5'")
         it.compute(self.project.na)
         if it.error:
-            QMessageBox.warning(self, "varmelt melt",
-                                f"{cand.name}:\n{it.error}")
-            return
+            if not quiet:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "varmelt melt",
+                                    f"{cand.name}:\n{it.error}")
+            return cand.name
         self.project.add(it)
         self._refresh_list()
         self._render_plots()
@@ -329,6 +342,7 @@ class MainWindow(QMainWindow):
         self._select_index(len(self.project.items) - 1)
         self.statusBar().showMessage(
             f"designed fragment added: {cand.name}", 6000)
+        return None
 
     def _rename_item(self):
         it = self._current_item()

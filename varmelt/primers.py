@@ -11,6 +11,8 @@ Replicates the parameter profile used by the Genomic HyperBrowser
     inside the amplicon
 """
 
+import contextlib
+import locale
 import threading
 from typing import List, Optional, Tuple
 
@@ -19,6 +21,31 @@ from primer3 import bindings
 # primer3-py drives the Primer3 C library through process-global state and is
 # not thread-safe.  Serialise calls so parallel batch runs stay correct.
 _PRIMER3_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def _numeric_c_locale():
+    """Run a raw Primer3 call under the "C" locale.
+
+    Primer3's C core parses float settings with ``strtod``, which honours
+    ``LC_NUMERIC``.  Qt (``QApplication``) switches ``LC_NUMERIC`` to the
+    environment locale -- on this machine ``nb_NO``, whose decimal separator
+    is a comma -- so Primer3 then rejects every ``50.0``/``60.0`` value with
+    "Illegal PRIMER_DNA_CONC value".  Force "C" around the call and restore
+    whatever the caller had afterwards.
+    """
+    try:
+        prev = locale.setlocale(locale.LC_NUMERIC, None)
+    except locale.Error:
+        prev = None
+    changed = bool(prev) and prev not in ("C", "POSIX")
+    if changed:
+        locale.setlocale(locale.LC_NUMERIC, "C")
+    try:
+        yield
+    finally:
+        if changed:
+            locale.setlocale(locale.LC_NUMERIC, prev)
 
 GC_CLAMP = "CGCCCGCCGCGCCCCGCGCCCGTCCCGCCGCCCCCGCCCGGG"
 
@@ -185,7 +212,8 @@ def design(seq: str, chrom: str = "", var_pos: int = None,
                                    opt_tm=opt_tm, min_tm=min_tm,
                                    max_tm=max_tm)
         with _PRIMER3_LOCK:
-            res = bindings.design_primers(seq_args, _global_args())
+            with _numeric_c_locale():
+                res = bindings.design_primers(seq_args, _global_args())
         for ci in range(_P3_NUM_CANDIDATES):
             left = res.get(f"PRIMER_LEFT_{ci}")
             right = res.get(f"PRIMER_RIGHT_{ci}")
