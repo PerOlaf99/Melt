@@ -54,17 +54,18 @@ class DesignDialog(QDialog):
         form = QFormLayout()
         self.rsid_edit = QLineEdit()
         self.rsid_edit.setPlaceholderText("e.g. rs113488022 (BRAF V600E)")
+        self.rsid_edit.textChanged.connect(self._sync_manual)
         form.addRow("dbSNP rsID", self.rsid_edit)
 
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
-        form.addRow("or manual", line)
+        form.addRow("&nbsp;&nbsp;or enter the position", line)
 
         chr_row = QHBoxLayout()
         self.chrom_edit = QLineEdit("chr7")
         self.chrom_edit.setFixedWidth(90)
         self.pos_spin = QSpinBox()
-        self.pos_spin.setRange(1, 3_000_000_000)
+        self.pos_spin.setRange(1, 700_000_000)
         self.pos_spin.setValue(140453136)
         chr_row.addWidget(self.chrom_edit)
         chr_row.addWidget(QLabel("position"))
@@ -75,8 +76,10 @@ class DesignDialog(QDialog):
         refalt_row = QHBoxLayout()
         self.ref_edit = QLineEdit("G")
         self.ref_edit.setFixedWidth(70)
+        self.ref_edit.setToolTip("reference allele at the position")
         self.alt_edit = QLineEdit("A")
         self.alt_edit.setFixedWidth(70)
+        self.alt_edit.setToolTip("mutant allele (designed against)")
         refalt_row.addWidget(self.ref_edit)
         refalt_row.addWidget(QLabel("ref"))
         refalt_row.addWidget(self.alt_edit)
@@ -86,7 +89,10 @@ class DesignDialog(QDialog):
 
         self.genome_combo = QComboBox()
         self.genome_combo.addItems(["hg38", "hg19"])
-        form.addRow("Assembly", self.genome_combo)
+        self.genome_combo.setToolTip(
+            "coordinates are build-specific: pick the build your "
+            "chrom/position refer to (an rsID is resolved for this build)")
+        form.addRow("Genome build", self.genome_combo)
 
         self.na_spin = QDoubleSpinBox()
         self.na_spin.setRange(0.001, 1.0)
@@ -99,6 +105,17 @@ class DesignDialog(QDialog):
         self.maxfrag_spin.setRange(100, 500)
         self.maxfrag_spin.setValue(240)
         form.addRow("Max fragment (bp)", self.maxfrag_spin)
+
+        self.manual = [self.chrom_edit, self.pos_spin, self.ref_edit,
+                       self.alt_edit]
+
+        self.hint = QLabel(
+            "Give a <b>dbSNP rsID</b> (its chromosome/position/alleles are "
+            "resolved for the chosen build) <b>or</b> fill in "
+            "<b>chromosome</b>, <b>position</b>, <b>ref</b> and <b>alt</b>. "
+            "For a position, the <b>genome build</b> must match your "
+            "coordinates.  Then press Design.")
+        self.hint.setWordWrap(True)
 
         btns = QHBoxLayout()
         self.design_btn = QPushButton("&Design")
@@ -131,12 +148,21 @@ class DesignDialog(QDialog):
         self.add_btn.setEnabled(False)
 
         body = QVBoxLayout(self)
+        body.addWidget(self.hint)
         body.addLayout(form)
         body.addLayout(btns)
         body.addWidget(self.status)
         body.addWidget(self.table)
         body.addWidget(QLabel(SCORE_NOTE))
         body.addWidget(self.add_btn)
+
+        self._sync_manual()
+
+    def _sync_manual(self):
+        """Manual chrom/pos/ref/alt row is only needed without an rsID."""
+        using_rsid = bool(self.rsid_edit.text().strip())
+        for w in self.manual:
+            w.setEnabled(not using_rsid)
 
     # ------------------------------------------------------------ design - #
     def _params(self) -> dict:

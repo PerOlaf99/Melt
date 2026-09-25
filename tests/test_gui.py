@@ -552,8 +552,8 @@ def test_example_menu_braf_v600e_and_toggle():
     it = items[0]
     ok(len(it.wt) == len(it.mut) == 127, "V600E pair is two 127 bp strands")
     diffs = [i for i, (a, b) in enumerate(zip(it.wt, it.mut)) if a != b]
-    ok(len(diffs) == 1 and it.wt[diffs[0] - 1:diffs[0] + 3] == "GTG"
-       and it.mut[diffs[0] - 1:diffs[0] + 3] == "GAG",
+    ok(len(diffs) == 1 and it.wt[diffs[0] - 1:diffs[0] + 2] == "GTG"
+       and it.mut[diffs[0] - 1:diffs[0] + 2] == "GAG",
        "single T>A turns the GTG codon into GAG (c.1799T>A, V600E)")
     ok(BRAF_FLAT_VS_SLOPED[diffs[0]] == "T", "the changed base is a T")
 
@@ -650,6 +650,14 @@ def test_design_dialog_adds_candidate():
     win._open_design()
     dlg = win._design_dlg
     ok(dlg is not None, "Design menu opens the dialog")
+    ok(dlg.chrom_edit.isEnabled(), "manual fields enabled without an rsID")
+    dlg.rsid_edit.setText("rs113488022")
+    app.processEvents()
+    ok(not dlg.chrom_edit.isEnabled() and not dlg.ref_edit.isEnabled(),
+       "typing an rsID grays out the manual position row")
+    dlg.rsid_edit.clear()
+    app.processEvents()
+    ok(dlg.design_btn.isEnabled(), "Design button ready")
     dlg._on_design()
     dlg._thread.wait()
     app.processEvents()
@@ -678,6 +686,9 @@ if __name__ == "__main__":
     test_chart_renders_png()
     test_clamp_anchor_indel()
     test_example_menu_braf_flat_vs_sloped()
+    test_example_menu_braf_v600e_and_toggle()
+    test_example_menu_braf_silent_vs_v600e()
+    test_design_dialog_adds_candidate()
     test_buttons_and_table()
     print("\n" + ("ALL GUI TESTS PASSED" if failures == 0
                   else f"{failures} FAILURE(S)"))
