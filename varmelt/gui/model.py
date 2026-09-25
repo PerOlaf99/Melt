@@ -25,6 +25,7 @@ class Item:
     seq: str = ""
     wt: str = ""
     mut: str = ""
+    plot: bool = True         # whether the GUI shows this item's chart
     result: dict = field(default=None, repr=False)
     error: str = field(default="", repr=False)
 
@@ -112,7 +113,8 @@ class Item:
                 "paired": paired}
 
     def to_dict(self) -> dict:
-        d = {"kind": self.kind, "name": self.name, "clamp": self.clamp}
+        d = {"kind": self.kind, "name": self.name, "clamp": self.clamp,
+             "plot": bool(self.plot)}
         if self.kind == "seq":
             d["seq"] = self.seq
         else:
@@ -127,7 +129,8 @@ class Item:
                    clamp=d.get("clamp", "5'"),
                    seq=d.get("seq", ""),
                    wt=d.get("wt", ""),
-                   mut=d.get("mut", ""))
+                   mut=d.get("mut", ""),
+                   plot=bool(d.get("plot", True)))
 
 
 class Project:

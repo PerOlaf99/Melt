@@ -56,9 +56,11 @@ pairs — and get the per-base melting map and the primer set (first/last 20
 bases, optional GC clamp) immediately.  `python -m varmelt.gui project.json`
 opens a saved project on start.
 
-- One chart per selected amplicon: the black wildtype melt map with the
-  mutant overlaid dashed red, the GC-clamp oligo shaded grey at the end it
-  occupies, the mutation base marked.
+- One chart per ticked amplicon — tick any rows in the list and several
+  melt maps are plotted at the same time (each: black wildtype map, mutant
+  overlaid dashed red, the GC-clamp oligo shaded grey at the end it occupies,
+  the mutation base marked, and the pink area between the wt and mutant
+  curves showing the melt separation, with the ΔTm in the panel header).
 - Live adjustment: change the salt (Na+) or the selected amplicon's GC
   clamp and the map, Tm and primer set re-plot right away.
 - File menu: New / Open / Save / Save As (`*.varmelt.json`), export the

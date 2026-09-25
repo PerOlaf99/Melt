@@ -20,6 +20,15 @@ MUT = SEQ[:40] + "T" + SEQ[41:]         # A -> T at base 40/41
 failures = 0
 
 
+def stack_widgets(win):
+    out = []
+    for i in range(win.stack.count()):
+        w = win.stack.itemAt(i).widget()
+        if w is not None:
+            out.append(w)
+    return out
+
+
 def ok(cond, msg):
     global failures
     if cond:
@@ -71,6 +80,7 @@ def test_model_compute_roundtrip():
 def test_chart_renders_png():
     from PySide6.QtWidgets import QApplication
     from varmelt.gui.main import MainWindow
+    from varmelt.gui.plot import MeltChart
     from varmelt.primers import GC_CLAMP
 
     app = QApplication.instance() or QApplication([])
@@ -83,28 +93,56 @@ def test_chart_renders_png():
     win._recompute_current()
     it = win._current_item()
     ok(not it.error, "chart item computes")
-    ok(len(win.chart._ref) == len(SEQ) + len(GC_CLAMP),
+    win.project.items[1].compute(win.project.na)
+    win._refresh_list()
+    win._render_plots()
+
+    def charts():
+        from varmelt.gui.plot import MeltChart as _MC
+        return [w for w in stack_widgets(win) if isinstance(w, _MC)]
+
+    win_checks = [(i.plot, i.result is not None and not i.error)
+                  for i in win.project.items]
+    ok(win_checks[0][0], "seq item is ticked to plot")
+    ok(all(plot and ok_ for plot, ok_ in win_checks),
+       "both items ticked + computed after selection")
+    ok(len(charts()) == 2, "two chart panels plotted at the same time")
+
+    it = win.project.items[0]
+    fd = it.fragment_profiles(win.project.na)
+    ch = MeltChart()
+    ch.set_map(**fd, mark_label="mutation")
+    ok(len(ch._ref) == len(SEQ) + len(GC_CLAMP),
        "chart shows 5' clamp bases in the curve")
-    ok(len(win.chart._alt) == 0, "seq mode: no alt curve")
-    pm = win.chart.grab()
+    ok(len(ch._alt) == 0, "seq mode: no alt curve")
+    pm = ch.grab()
     ok(not pm.isNull(), "chart paints to pixmap")
+    ok(not ch._delta_drawn, "seq chart draws no delta band")
     with tempfile.TemporaryDirectory() as td:
         path = os.path.join(td, "chart.png")
         ok(pm.save(path, "PNG") and os.path.getsize(path) > 0,
            "chart PNG written")
 
-    win.list.setCurrentRow(1)
-    win._recompute_current()
-    it = win._current_item()
+    it = win.project.items[1]
     ok(not it.error, "pair item computes")
-    ok(len(win.chart._ref) == len(SEQ) + len(GC_CLAMP),
+    fd = it.fragment_profiles(win.project.na)
+    ch2 = MeltChart()
+    ch2.set_map(**fd, mark_label="mutation")
+    ok(len(ch2._ref) == len(SEQ) + len(GC_CLAMP),
        "pair: 3' clamp extends ref curve")
-    ok(len(win.chart._alt) == len(MUT) + len(GC_CLAMP),
+    ok(len(ch2._alt) == len(MUT) + len(GC_CLAMP),
        "pair mode: alt curve with clamp present")
-    ok(win.chart._mark_idx == 40, "mutation mark preserved after clamp")
-    ok(win.chart._paired is True, "paired flag on chart")
+    ok(ch2._mark_idx == 40, "mutation mark preserved after clamp")
+    ok(ch2._paired is True, "paired flag on chart")
+    ch2.grab()
+    ok(ch2._delta_drawn, "pair chart fills the wt-mutant delta area")
 
-    row = win._csv_row(it)
+    # toggle off the pair -> only one panel remains
+    win.project.items[1].plot = False
+    win._render_plots()
+    ok(len(charts()) == 1, "untick removes the panel from the stack")
+
+    row = win._csv_row(win.project.items[1])
     ok(row is not None and row[0] == "frag_pair", "csv row for pair")
     ok(row[6] == 0 and row[7] == 79 and row[8] == 80,
        "product start/end/length in csv row")

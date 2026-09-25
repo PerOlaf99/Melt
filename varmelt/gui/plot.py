@@ -33,6 +33,7 @@ class MeltChart(QWidget):
         self._xmin, self._xmax = 30.0, 98.0
         self._paired = False
         self._status = "no data"
+        self._delta_drawn = False
 
     def clear(self, status="no data"):
         self._seq = ""
@@ -60,6 +61,7 @@ class MeltChart(QWidget):
         self._indel = int(indel)
         self._paired = bool(paired)
         self._status = "ready"
+        self._delta_drawn = False
         self.update()
 
     # -- geometry / helpers ----------------------------------------------- #
@@ -85,6 +87,48 @@ class MeltChart(QWidget):
                                self._yf(t, pad_t, plot_h)))
         if len(seg) >= 2:
             qp.drawPolyline(QPolygonF(seg))
+
+    def _draw_delta_band(self, qp, n, pad_l, pad_t, plot_w, plot_h):
+        """Translucent area between the wt and mutant curves (aligned at the
+        mutation, leaving a gap for an indel) -- the visual melt separation
+        for a wt/mut pair.  Sets :attr:`_delta_drawn` when a band was
+        actually rendered."""
+        if not self._alt or not self._paired:
+            return
+        n_alt = len(self._alt)
+        var = self._mark_idx if self._mark_idx is not None else 0
+
+        def g_alt(j):
+            return j if j < var else j + self._indel
+
+        def flush(top, bot):
+            if len(top) >= 2 and len(bot) >= 2:
+                qp.setPen(Qt.NoPen)
+                qp.setBrush(QColor(255, 195, 195, 150))
+                qp.drawPolygon(QPolygonF(
+                    [QPointF(x, y) for x, y in top]
+                    + [QPointF(x, y) for x, y in reversed(bot)]))
+                self._delta_drawn = True
+
+        top, bot = [], []
+        for i in range(n):
+            rt = self._ref[i]
+            j = i if i < var else i - self._indel
+            if math.isnan(rt) or not (0 <= j < n_alt) \
+                    or math.isnan(self._alt[j]):
+                flush(top, bot)
+                top, bot = [], []
+                continue
+            x = self._xf(i, pad_l, plot_w, n)
+            yr = self._yf(rt, pad_t, plot_h)
+            ya = self._yf(self._alt[j], pad_t, plot_h)
+            if yr <= ya:
+                top.append((x, yr))
+                bot.append((x, ya))
+            else:
+                top.append((x, ya))
+                bot.append((x, yr))
+        flush(top, bot)
 
     # -- painting --------------------------------------------------------- #
     def paintEvent(self, event):                        # noqa: N802
@@ -134,6 +178,9 @@ class MeltChart(QWidget):
             v = self._mark_idx if self._mark_idx is not None else 0
             return i if i < v else i + self._indel
 
+        # wt minus mutant melt separation (wt/mut pairs only)
+        self._draw_delta_band(qp, n, pad_l, pad_t, plot_w, plot_h)
+
         # wildtype (black)
         qp.setBrush(Qt.NoBrush)
         qp.setPen(QColor("#222"))
@@ -164,7 +211,8 @@ class MeltChart(QWidget):
         qp.setFont(QFont("Helvetica", 8))
         qp.setPen(QColor("#999"))
         if self._paired and self._alt:
-            cap = "black = wildtype    dashed red = mutant    (5'->3')"
+            cap = ("black = wildtype    dashed red = mutant    "
+                   "shaded = melt separation    (5'->3')")
         elif self._alt:
             cap = "black = reference    dashed red = variant    (5'->3')"
         else:

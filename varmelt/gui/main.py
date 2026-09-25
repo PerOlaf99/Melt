@@ -1,4 +1,5 @@
 """Main window of the standalone varmelt GUI (WinMelt-style workbench)."""
+import html
 import os
 import sys
 
@@ -57,8 +58,15 @@ class MainWindow(QMainWindow):
         self.list = QListWidget()
         self.list.itemSelectionChanged.connect(self._on_select)
         self.list.itemDoubleClicked.connect(lambda _: self._rename_item())
+        self.list.itemChanged.connect(self._on_item_changed)
         self.list.setSelectionMode(QAbstractItemView.SingleSelection)
         lay.addWidget(self.list)
+
+        from PySide6.QtWidgets import QLabel as _L
+        tip = _L("<small>tick a row to plot it — several charts are shown "
+                 "at once</small>")
+        tip.setWordWrap(True)
+        lay.addWidget(tip)
 
         row = QHBoxLayout()
         from PySide6.QtWidgets import QPushButton
@@ -83,7 +91,7 @@ class MainWindow(QMainWindow):
         self._del_button = b_del
         self.list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._context_menu)
-        left.setMaximumWidth(360)
+        left.setMaximumWidth(340)
         splitter.addWidget(left)
 
         # right: chart + settings + table
@@ -115,8 +123,17 @@ class MainWindow(QMainWindow):
         self.info.setWordWrap(True)
         rlay.addWidget(self.info)
 
-        self.chart = MeltChart()
-        rlay.addWidget(self.chart, stretch=1)
+        from PySide6.QtWidgets import QScrollArea
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        self._plotcanvas = QWidget()
+        self.stack = QVBoxLayout(self._plotcanvas)
+        self.stack.setContentsMargins(0, 0, 0, 0)
+        self.stack.setSpacing(6)
+        self._plotcanvas.stack = self.stack
+        scroll.setWidget(self._plotcanvas)
+        self._scroll = scroll
+        rlay.addWidget(scroll, stretch=1)
 
         rlay.addWidget(QLabel("<b>Primer set</b> (first/last 20 bases):"))
         self.table = QTableWidget(0, 10)
@@ -299,9 +316,59 @@ class MainWindow(QMainWindow):
         self.project = Project()
         self.path = None
         self._refresh_list()
-        self.chart.clear()
+        self._render_plots()
         self.info.setText("no item selected")
         self.statusBar().showMessage("new project")
+
+    def _render_plots(self):
+        """Rebuild the chart stack: one panel per ticked item."""
+        while self.stack.count():
+            item_w = self.stack.takeAt(0)
+            w = item_w.widget()
+            if w is not None:
+                self.stack.removeWidget(w)
+                w.deleteLater()
+        shown = [it for it in self.project.items if it.plot and it.result
+                 and not it.error]
+        if not shown:
+            empty = QLabel("tick an amplicon in the list to plot its melt "
+                           "map")
+            empty.setAlignment(Qt.AlignCenter)
+            empty.setStyleSheet("color:#999")
+            self.stack.addWidget(empty)
+            self.stack.addStretch(1)
+            return
+        import math
+        for idx, it in enumerate(shown):
+            fd = it.fragment_profiles(self.project.na)
+            if fd is None:
+                continue
+            ref_prof = fd["ref_prof"]
+            alt_prof = fd["alt_prof"]
+
+            def _mean(vals):
+                vals = [v for v in vals if not math.isnan(v)]
+                return sum(vals) / len(vals) if vals else float("nan")
+
+            mean = _mean(ref_prof)
+            kind = "wt/mut" if fd["paired"] else "sequence"
+            clamp = {None: "no clamp", "5'": "5' clamp",
+                     "3'": "3' clamp"}.get(fd["clamp_side"], "no clamp")
+            delta = ""
+            if fd["paired"] and alt_prof is not None:
+                d = _mean(alt_prof) - mean
+                delta = f" · &Delta;Tm {d:+.2f} °C"
+            head = QLabel(
+                f"<b>{html.escape(it.name)}</b>"
+                f"&nbsp;&nbsp;<span style='color:#777'>{kind} · "
+                f"{len(ref_prof)} bp · mean Tm {mean:.2f} °C · "
+                f"{clamp}{delta}</span>")
+            self.stack.addWidget(head)
+            chart = MeltChart()
+            chart.set_map(**fd, mark_label="mutation")
+            self.stack.addWidget(chart)
+        self.stack.addStretch(1)
+        self._scroll.verticalScrollBar().setValue(0)
 
     # ----------------------------------------------------------- file io - #
     def _selected_file(self, save: bool):
@@ -359,19 +426,22 @@ class MainWindow(QMainWindow):
 
     # ----------------------------------------------------------- exports - #
     def _export_png(self):
-        it = self._current_item()
-        if it is None or it.error:
-            QMessageBox.warning(self, "varmelt melt", "no chart to save")
+        visible = [it for it in self.project.items
+                   if it.plot and it.result and not it.error]
+        if not visible:
+            QMessageBox.warning(self, "varmelt melt",
+                                "tick an amplicon to plot first")
             return
-        p, _ = QFileDialog.getSaveFileName(self, "Export chart image",
-                                           it.name + ".png",
-                                           "PNG image (*.png)")
+        p, _ = QFileDialog.getSaveFileName(
+            self, "Export chart image",
+            (self.path and os.path.basename(self.path).rsplit(".", 1)[0]
+             or "melting") + "-plots.png", "PNG image (*.png)")
         if not p:
             return
         if not p.endswith(".png"):
             p += ".png"
-        if self.chart.grab().save(p, "PNG"):
-            self.statusBar().showMessage(f"chart saved {p}", 3000)
+        if self._plotcanvas.grab().save(p, "PNG"):
+            self.statusBar().showMessage(f"charts saved to {p}", 3000)
 
     def _export_csv(self):
         if not self.project.items:
@@ -443,6 +513,9 @@ class MainWindow(QMainWindow):
                         label += ")"
                 item = QListWidgetItem(label)
                 item.setData(Qt.UserRole, it)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Checked if it.plot
+                                   else Qt.Unchecked)
                 self.list.addItem(item)
             if selected is not None:
                 for r in range(self.list.count()):
@@ -451,6 +524,15 @@ class MainWindow(QMainWindow):
                         break
         finally:
             self.list.blockSignals(False)
+
+    def _on_item_changed(self, item):
+        it = item.data(Qt.UserRole)
+        if it is None:
+            return
+        new_state = bool(int(item.checkState()))   # Checked/Unchecked->bool
+        if bool(it.plot) != new_state:
+            it.plot = new_state
+            self._render_plots()
 
     def _on_select(self):
         self._sync_controls_from_item()
@@ -480,7 +562,7 @@ class MainWindow(QMainWindow):
     def _recompute_current(self):
         it = self._current_item()
         if it is None:
-            self.chart.clear()
+            self._render_plots()
             self.table.setRowCount(0)
             self.info.setText("no item selected")
             return
@@ -488,6 +570,7 @@ class MainWindow(QMainWindow):
         QGuiApplication.processEvents()
         it.compute(self.project.na)
         self._refresh_list()
+        self._render_plots()
         self._render_item(it)
         if it.error:
             self.statusBar().showMessage(
@@ -499,14 +582,12 @@ class MainWindow(QMainWindow):
 
     def _render_item(self, it: Item):
         if it.error or not it.result:
-            self.chart.clear(it.error or "no data")
             self.table.setRowCount(0)
             self.info.setText(f"{it.name}: {it.error}" if it.error
                               else "no data")
             return
         r = it.result
         pair = it.pair()
-        self.chart.set_map(**it.fragment_profiles(self.project.na))
 
         kind = it.kind_label()
         dnalen = r.get("dnalen") or len(r["refseq"])
