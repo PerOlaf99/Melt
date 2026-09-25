@@ -99,7 +99,6 @@ def test_chart_renders_png():
     ok(len(ch._datasets) == 2, "one overlay contains both ticked items")
     ok(ch._datasets[0]["color"] != ch._datasets[1]["color"],
        "each item gets its own line colour")
-    ok(ch.max_amp_span() == len(SEQ), "amplicon frame spans both fragments")
     ok(win._csv_row(win.project.items[1])
        and win._csv_row(win.project.items[1])[0] == "frag_pair",
        "csv row for pair")
@@ -107,19 +106,26 @@ def test_chart_renders_png():
     ok(row[6] == 0 and row[7] == 79 and row[8] == 80 + len(GC_CLAMP),
        "product coords + fragment length incl. the 3' GC clamp in csv")
 
-    # different clamp sides still share the amplicon frame: the 5' clamp
-    # sticks out to the left (x < 0), the 3' clamp to the right (x >= 80)
+# physical-fragment axis: base 1 is always the left edge; the clamp
+    # tail occupies real bases on the end that carries it (5' -> bases
+    # 1..42, 3' -> after the amplicon)
+    ok(ch._data_x0 == 0, "base 1 starts at the left edge of the plot")
+    ok(ch.max_fragment_len() == len(SEQ) + len(GC_CLAMP),
+       "x axis spans the full physical fragment (amplicon + clamp)")
     d5 = ch._datasets[0]
     d3 = ch._datasets[1]
-    ok(MeltChart.substrate_x(d5, len(GC_CLAMP)) == 0,
-       "5' clamp: amplicon base 1 sits at x=0")
-    ok(MeltChart.substrate_x(d5, len(GC_CLAMP) + 40) == 40,
-       "5' clamp: inner bases align to x = amplicon offset")
+    ok(MeltChart.substrate_x(d5, 0) == 0,
+       "physical coords: substrate index 0 is x 0 (base 1)")
+    ok(MeltChart.substrate_x(d5, len(GC_CLAMP)) == len(GC_CLAMP),
+       "5' clamp occupies physical bases 1..42")
+    ok(MeltChart.substrate_x(d5, len(GC_CLAMP) + 40) == len(GC_CLAMP) + 40,
+       "5' clamp: amplicon base 1 sits at physical base 43")
     ok(MeltChart.substrate_x(d3, 0) == 0,
-       "3' clamp: amplicon base 1 still at x=0 (aligned)")
-    ok(ch._data_x0 == -len(GC_CLAMP), "5' clamp tail extends left of frame")
+       "3' clamp: amplicon base 1 is physical base 1")
+    ok(MeltChart.substrate_x(d3, len(GC_CLAMP)) == len(GC_CLAMP),
+       "3' clamp: clamp bases follow the amplicon")
     ok(ch._data_x1 == len(SEQ) + len(GC_CLAMP),
-       "3' clamp tail extends right of frame")
+       "x axis ends at the last physical base")
 
     # GC clamp is not a primer: reported primers are the bare 20-mers
     from varmelt.primers import _revcomp

@@ -70,11 +70,10 @@ opens a saved project on start.
 - Pasting works with the plain headers `>wt` / `>mut` (or `>ref` /
   `>alt`), no `_suffix_` base name required, and pairs like
   `name_wt`/`name_mut` as before.
-- Fragments are aligned on their amplicon frame, so the GC clamp never
-  shifts the amplicon: the clamp is drawn as a grey tail *outside* the
-  frame (base-ruler at the bottom labels your amplicon base positions) —
-  two fragments with clamps on different sides stay comparable because
-  Base 1 of each amplicon is always Base 1 on the plot.
+- The plot's **x-axis is the physical fragment**, numbered from base 1 at
+  the left edge: a `5'` GC clamp occupies bases 1..42 (grey tail) and the
+  amplicon starts at base 43, a `3'` clamp sits after the amplicon.  The
+  ruler labels the real bases, grey for clamp bases.
 - The GC clamp is *not* part of the primer: the reported primer sequences
   are the bare 20-mers (with a 42-base left clamp the forward primer
   starts at amplicon base 43) and no primer or mutation markers clutter

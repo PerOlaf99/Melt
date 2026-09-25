@@ -1,17 +1,18 @@
 """QPainter-based melting-profile chart for the varmelt GUI.
 
 One canvas overlays the per-base melting maps of all ticked amplicons so
-they can be compared under the same conditions (CTCE).  Every amplicon is
-laid out on a *shared amplicon frame*: amplicon base ``j`` always maps to
-``x == j``, and the GC-clamp oligo is drawn as a grey tail *outside* that
-frame (to the left for a ``5'`` clamp, to the right for a ``3'`` clamp).
-That keeps fragments with clamps on different sides comparable instead of
-shifting one amplicon relative to the other.
+they can be compared under the same conditions (CTCE).  The x-axis is the
+*physical fragment*: base 1 is the first base of the DNA that melts, so a
+``5'`` GC-clamp oligo occupies bases 1..42 (grey tail) and the amplicon
+starts at base 43, while a ``3'`` clamp sits after the amplicon.  Every
+dataset is numbered from its own base 1 which is always the left edge of
+the plot.
 
 Each item gets its own colour (wildtype solid, mutant dashed) and a legend
 shows which line belongs to which amplicon.  There are no primer or
 mutation markers.  The view can be zoomed with the wheel or the +/- /
-Reset actions and panned by dragging (double click resets).
+Reset actions, with a drag box, and panned by shift/middle-dragging
+(double click resets).
 """
 import math
 
@@ -69,16 +70,13 @@ class MeltChart(QWidget):
         xs, ys = [], []
         for d in self._datasets:
             ref = d.get("ref_prof") or []
-            cl = max(0, int(d.get("clamp_len", 0)))
-            side = d.get("clamp_side")
-            amp = max(len(ref) - cl, 1)
-            xs.append(((-cl if side == "5'" else 0),
-                       amp + (cl if side == "3'" else 0)))
+            # physical fragment: base 1 is the left edge, clamp included
+            xs.append((0, max(len(ref), 1)))
             for t in list(ref) + list(d.get("alt_prof") or []):
                 if t is not None and not math.isnan(t):
                     ys.append(float(t))
-        self._data_x0 = min((a for a, _ in xs), default=0.0)
-        self._data_x1 = max((b for _, b in xs), default=100.0)
+        self._data_x0, self._data_x1 = 0.0, max((b for _, b in xs),
+                                                default=100.0)
         if self._data_x1 - self._data_x0 < 1:
             self._data_x1 = self._data_x0 + 1
         y0 = min(ys, default=50.0)
@@ -89,16 +87,15 @@ class MeltChart(QWidget):
 
     @staticmethod
     def substrate_x(d, i):
-        """x position of substrate base *i* (amplicon frame, see module doc)."""
-        return float(i) - amp_start(d.get("clamp_side"),
-                                    d.get("clamp_len", 0))
+        """x position of substrate base *i*: the physical fragment, so the
+        coordinate is simply the base's position (base 1 at x == 0)."""
+        return float(i)
 
-    def max_amp_span(self):
+    def max_fragment_len(self):
         span = 0
         for d in self._datasets:
             ref = d.get("ref_prof") or []
-            span = max(span, max(len(ref)
-                                 - max(0, int(d.get("clamp_len", 0))), 0))
+            span = max(span, len(ref))
         return span
 
     # --------------------------------------------------------- zoom / pan - #
@@ -282,40 +279,35 @@ class MeltChart(QWidget):
 
         self._legend_lines = 0
         self._delta_count = 0
-        span_x = self.max_amp_span()
+        span_x = self._data_x1 - self._data_x0
 
-        # shared amplicon frame: a very light band behind everything
-        if span_x > 0:
-            qp.setPen(Qt.NoPen)
-            qp.setBrush(QColor("#f7fafd"))
-            x0 = self._x(0, plot_w)
-            x1 = self._x(span_x, plot_w)
-            qp.drawRect(int(x0), int(pad_t), int(max(x1 - x0, 2)),
-                        int(plot_h))
-
-        # GC-clamp tails (grey, outside the amplicon frame — never a primer)
-        clamp_tails = {}
+        # physical fragment band behind each dataset's amplicon (base 1..N),
+        # with the GC clamp drawn as a grey tail at the end that carries it
         for d in self._datasets:
+            ref = d.get("ref_prof") or []
             cl = max(0, int(d.get("clamp_len", 0)))
             side = d.get("clamp_side")
-            if not cl or side not in ("5'", "3'"):
-                continue
-            amp = max(len(d.get("ref_prof") or []) - cl, 0)
-            a = -cl if side == "5'" else amp
-            b = 0 if side == "5'" else amp + cl
-            clamp_tails.setdefault(side, []).append((a, b))
-        for side, tails in clamp_tails.items():
-            x0 = min(self._x(a, plot_w) for a, _ in tails)
-            x1 = max(self._x(b, plot_w) for _, b in tails)
-            qp.setPen(Qt.NoPen)
-            qp.setBrush(QColor("#efeceb"))
-            qp.drawRect(int(x0), int(pad_t), int(max(x1 - x0, 2)),
-                        int(plot_h))
-            qp.setPen(QColor("#b6a9a4"))
-            qp.setFont(QFont("Helvetica", 7, QFont.Bold))
-            qp.drawText(int((x0 + x1) / 2 - 46), int(pad_t + 5), 92, 12,
-                        Qt.AlignHCenter,
-                        f"GC clamp {side}")
+            amp = max(len(ref) - cl, 0)
+            a = amp_start(side, cl)
+            if amp > 0:
+                qp.setPen(Qt.NoPen)
+                qp.setBrush(QColor("#f7fafd"))
+                x0 = self._x(a, plot_w)
+                x1 = self._x(a + amp, plot_w)
+                qp.drawRect(int(x0), int(pad_t), int(max(x1 - x0, 2)),
+                            int(plot_h))
+            if cl and side in ("5'", "3'"):
+                ca = 0 if side == "5'" else amp
+                qp.setPen(Qt.NoPen)
+                qp.setBrush(QColor("#efeceb"))
+                x0 = self._x(ca, plot_w)
+                x1 = self._x(ca + cl, plot_w)
+                qp.drawRect(int(x0), int(pad_t), int(max(x1 - x0, 2)),
+                            int(plot_h))
+                qp.setPen(QColor("#b6a9a4"))
+                qp.setFont(QFont("Helvetica", 7, QFont.Bold))
+                qp.drawText(int((x0 + x1) / 2 - 46), int(pad_t + 5), 92, 12,
+                            Qt.AlignHCenter, f"GC clamp {side}")
 
         # per-pair wt/mut separation band in that item's colour
         for d in self._datasets:
@@ -357,7 +349,7 @@ class MeltChart(QWidget):
 
         qp.setFont(QFont("Helvetica", 7))
         tick = 20 if span_x > 180 else 10 if span_x > 90 else 5
-        for b in range(0, span_x + 1, tick):
+        for b in range(0, int(span_x) + 1, tick):
             x = self._x(b, plot_w)
             if not (pad_l - 1 <= x <= w - pad_r + 1):
                 continue
