@@ -209,6 +209,10 @@ class MainWindow(QMainWindow):
         m_file.addSeparator()
         self._add_action(m_file, "&Quit", self.close, "Ctrl+Q")
 
+        m_exp = self.menuBar().addMenu("&Examples")
+        self._add_action(m_exp, "BRAF 127 bp flat vs sloped",
+                         self._load_example_braf)
+
         m_help = self.menuBar().addMenu("&Help")
         self._add_action(m_help, "&About", self._about)
 
@@ -245,6 +249,22 @@ class MainWindow(QMainWindow):
             self.project.add(it)
             self._refresh_list()
             self._select_index(len(self.project.items) - 1)
+
+    def _load_example_braf(self):
+        """Add the BRAF flat-vs-sloped illustration (both clamp sides)."""
+        from .examples import braf_flat_vs_sloped_items
+        items = braf_flat_vs_sloped_items()
+        for it in items:
+            self.project.add(it)
+            it.compute(self.project.na)
+        self._refresh_list()
+        self._render_plots()
+        self._render_table()
+        self._select_index(len(self.project.items) - 1)
+        self._render_info(self._current_item())
+        self.statusBar().showMessage(
+            "BRAF 127 bp: flat plateau under the 5' clamp vs the sloped "
+            "3'-clamped profile (Pichler et al., PMID 15948220)", 6000)
 
     def _rename_item(self):
         it = self._current_item()

@@ -490,6 +490,56 @@ def test_clamp_anchor_indel():
     ok(ch._data_x0 == 0, "a deletion keeps the plot starting at base 1")
 
 
+def test_example_menu_braf_flat_vs_sloped():
+    from varmelt.gui.examples import (BRAF_FLAT_VS_SLOPED,
+                                      braf_flat_vs_sloped_items)
+    from PySide6.QtWidgets import QApplication
+    from varmelt.gui.main import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    items = braf_flat_vs_sloped_items()
+    ok(len(items) == 2, "the BRAF example ships as two clamp sides")
+    ok(len(BRAF_FLAT_VS_SLOPED) == 127, "BRAF example fragment is 127 bp")
+    ok({i.clamp for i in items} == {"5'", "3'"}, "clamps are 5' and 3'")
+
+    win = MainWindow()
+    win._load_example_braf()
+    app.processEvents()
+    ok(len(win.project.items) == 2, "example loads two amplicons")
+    flat = next(i for i in win.project.items if i.clamp == "5'")
+    sloped = next(i for i in win.project.items if i.clamp == "3'")
+    ok(flat.result and sloped.result, "both example items compute")
+    ok(flat.result["melting_shape"] == "flat/slope ok"
+       == sloped.result["melting_shape"],
+       "both clamps read flat/slope ok — the contrast is visible, not flagged")
+
+    # the illustration: a long dead-flat run under the 5' clamp, but the
+    # same DNA is a steep slope when the clamp is on the 3' (PMID 15948220)
+    from varmelt import reference as R
+    from varmelt.primers import GC_CLAMP
+    p5 = R.calc_tm_profile(GC_CLAMP + BRAF_FLAT_VS_SLOPED, Na=0.013)
+    p3 = R.calc_tm_profile(BRAF_FLAT_VS_SLOPED + GC_CLAMP, Na=0.013)
+
+    def flat_run(prof, amps):
+        run = best = 0
+        prev = None
+        for i in range(amps[0], amps[1] + 1):
+            v = prof[i]
+            if v is None:
+                prev = None
+                continue
+            run = run + 1 if prev is not None and abs(v - prev) <= 0.05 else 1
+            best = max(best, run)
+            prev = v
+        return best
+
+    ok(flat_run(p5, (len(GC_CLAMP), len(p5) - 1)) >= 60,
+       "5' clamp: a long flat plateau (>=60 bp) illustrates the flat "
+       "fragment")
+    ok(flat_run(p3, (0, len(p3) - len(GC_CLAMP) - 1)) <= 20,
+       "3' clamp: the same DNA is sloped, no long plateau")
+
+
 if __name__ == "__main__":
     test_model_compute_roundtrip()
     test_project_schema()
@@ -497,6 +547,7 @@ if __name__ == "__main__":
     test_edit_field_bare_headers()
     test_chart_renders_png()
     test_clamp_anchor_indel()
+    test_example_menu_braf_flat_vs_sloped()
     test_buttons_and_table()
     print("\n" + ("ALL GUI TESTS PASSED" if failures == 0
                   else f"{failures} FAILURE(S)"))
