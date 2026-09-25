@@ -125,6 +125,8 @@ def test_chart_renders_png():
     ok(not pm.isNull(), "overlay plot paints to pixmap")
     ok(ch._delta_count == 1, "only the pair fills a delta area")
     ok(ch._legend_lines == 3, "legend lists seq, pair and its mutant line")
+    ok(any("\u0394area" in t for t in ch._legend_texts),
+       "legend reports the pair's numeric delta area")
     with tempfile.TemporaryDirectory() as td:
         path = os.path.join(td, "chart.png")
         ok(pm.save(path, "PNG") and os.path.getsize(path) > 0,
@@ -146,15 +148,44 @@ def test_chart_renders_png():
     ok(ch._view_y0 == ch._data_y0 and ch._view_y1 == ch._data_y1,
        "reset returns the y axis to the full Tm range")
 
+    # a drag rectangle zooms into the boxed region (left-drag rubber band)
+    from PySide6.QtCore import QRectF
+    ch.reset()
+    px = ch._pad_l + 1
+    py = ch._pad_t + 1
+    ch._rubber = QRectF(px, py, 0.0, 0.0)
+    rubber = QRectF(px, py, 100, 80)
+    ch._zoom_rect(rubber)
+    ok(ch._view_x1 - ch._view_x0 < ch._data_x1 - ch._data_x0,
+       "rubber-band zoom narrows the x view to the box")
+    ok(ch._view_y1 - ch._view_y0 < ch._data_y1 - ch._data_y0,
+       "rubber-band zoom narrows the y view to the box")
+    zx0, zx1, zy0, zy1 = (ch._view_x0, ch._view_x1,
+                          ch._view_y0, ch._view_y1)
+    ch._zoom_rect(QRectF(px, py, 2, 2))
+    ok((ch._view_x0, ch._view_x1, ch._view_y0, ch._view_y1) == (zx0, zx1, zy0, zy1),
+       "a sub-6 px drag is ignored (no accidental zoom)")
+    ch.reset()
+
     # the primer table lists every computed fragment, not just the selected
     win._render_table()
     ok(win.table.rowCount() == 2, "primer table row per computed item")
+    ok(win.table.columnCount() == 12,
+       "primer table carries a separation (delta-area) column")
     ok(win.table.item(0, 0).text() == "frag"
        and win.table.item(1, 0).text() == "frag_pair",
        "amplicon names in the first column")
     ok(win.table.item(0, 1).text() == SEQ[:20],
        "forward primer still the bare 20-mer")
     ok(win.table.item(1, 7).text() == "80", "pair column: length 80 bp")
+    ok(float(win.table.item(1, 9).text()) > 0,
+       "pair delta area is a positive number")
+    ok(win.table.item(1, 11).text() in ("flat/slope ok", "n/a")
+       or win.table.item(1, 11).text().startswith("dip"),
+       "pair melting shape is reported")
+    ok(win._csv_row(win.project.items[1])[10]
+       == win.table.item(1, 9).text(),
+       "csv delta area matches the table cell")
 
     # untick the pair -> a single dataset remains
     win.project.items[1].plot = False
@@ -242,6 +273,15 @@ def test_dialogs_and_filter_string():
     ok(len(items) == 2, "dialog parses seq + wt/mut pair")
     ok(items[0].kind == "seq" and items[1].kind == "pair",
        "dialog yields seq and pair items")
+
+    bare = AddSequenceDialog(win)
+    bare.seq_edit.setPlainText(">Wt\n" + SEQ + "\n>mut\n" + MUT +
+                               "\n>solo\n" + SEQ)
+    b = bare.items()
+    ok(len(b) == 2 and b[0].kind == "pair" and b[1].kind == "seq",
+       "bare >Wt/>mut headers are paired (dip colouring works)")
+    ok(b[0].name == "Wt/mut" and b[0].wt == SEQ and b[0].mut == MUT,
+       "bare pair keeps wildtype/mutant strings and name")
 
     dlg2 = AddPairDialog(win)
     dlg2.wt_edit.setPlainText(SEQ)

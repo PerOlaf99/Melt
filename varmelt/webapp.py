@@ -148,34 +148,55 @@ def _parse_fasta(text: str) -> list:
 _PAIR_SUFFIXES = {"wt": "mut", "mut": "wt", "ref": "alt", "alt": "ref"}
 
 
+def _side_parts(name):
+    """Split a record name into ``(base, suffix, suffixed)``.
+
+    Recognises the explicit ``name_wt``/``name_mut`` (or ``_ref``/``_alt``)
+    convention *and* the bare FASTA headers ``>wt``/``>mut`` (resp.
+    ``>ref``/``>alt``); a bare header comes back with an empty base and
+    ``suffixed=False``."""
+    n = str(name or "")
+    m = re.match(r"^(.*?)_(wt|mut|ref|alt)$", n, re.IGNORECASE)
+    if m:
+        return m.group(1), m.group(2).lower(), True
+    n2 = n.strip().lower()
+    if n2 in _PAIR_SUFFIXES:
+        return "", n2, False
+    return None, None, False
+
+
 def _pair_sequences(records: list) -> list:
     """Group pasted-sequence records that share a ``name_wt``/``name_mut``
-    (or ``name_ref``/``name_alt``) base name into wt/mut pairs; everything
-    else becomes a single-strand record."""
+    (or ``name_ref``/``name_alt``) base name — or that use the bare headers
+    ``>wt``/``>mut`` — into wt/mut pairs; everything else becomes a
+    single-strand record."""
     items = []
     used = set()
     for i, rec in enumerate(records):
         if i in used:
             continue
-        m = re.match(r"^(.*?)_(wt|mut|ref|alt)$",
-                     str(rec.get("name") or ""), re.IGNORECASE)
-        if m:
-            base = m.group(1)
-            sfx = m.group(2).lower()
+        base, sfx, suffixed = _side_parts(rec.get("name"))
+        if sfx:
             for j in range(i + 1, len(records)):
                 if j in used:
                     continue
-                m2 = re.match(r"^(.*?)_(wt|mut|ref|alt)$",
-                              str(records[j].get("name") or ""),
-                              re.IGNORECASE)
-                if m2 and m2.group(1) == base \
-                        and m2.group(2).lower() == _PAIR_SUFFIXES[sfx]:
-                    wt = records[i] if sfx in ("wt", "ref") else records[j]
-                    mut = records[j] if sfx in ("wt", "ref") else records[i]
-                    items.append({"kind": "pair", "name": base,
-                                  "wt": wt["seq"], "mut": mut["seq"]})
-                    used.update((i, j))
-                    break
+                base2, sfx2, suffixed2 = _side_parts(records[j].get("name"))
+                if sfx2 is None or sfx2 != _PAIR_SUFFIXES[sfx]:
+                    continue
+                if suffixed and suffixed2:
+                    if base2 != base:
+                        continue
+                    name = base
+                elif not suffixed and not suffixed2:
+                    name = f"{rec.get('name')}/{records[j].get('name')}"
+                else:                                   # style mismatch
+                    continue
+                wt = records[i] if sfx in ("wt", "ref") else records[j]
+                mut = records[j] if sfx in ("wt", "ref") else records[i]
+                items.append({"kind": "pair", "name": name,
+                              "wt": wt["seq"], "mut": mut["seq"]})
+                used.update((i, j))
+                break
         if i not in used:
             items.append({"kind": "seq", "name": rec["name"],
                           "seq": rec["seq"]})

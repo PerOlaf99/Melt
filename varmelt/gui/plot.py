@@ -47,7 +47,8 @@ class MeltChart(QWidget):
         self._view_y0, self._view_y1 = 40.0, 100.0
         self._legend_lines = 0
         self._delta_count = 0
-        self._drag = None
+        self._rubber = None
+        self._pan = None
         self._pad_l, self._pad_r = 52, 18
         self._pad_t, self._pad_b = 14, 30
 
@@ -214,12 +215,20 @@ class MeltChart(QWidget):
     def _draw_legend(self, qp, plot_w, plot_h):
         entries = []
         for d in self._datasets:
-            entries.append((d["color"], True, d["name"], None))
+            name = d.get("name", "")
+            if d.get("dip"):
+                name += "   \u26a0  valley"
+            entries.append((d["color"], True, name, None))
             if d.get("paired") and d.get("alt_prof"):
-                entries.append((d["color"], False, "mutant", d["name"]))
+                area = float(d.get("delta_area", 0.0))
+                entries.append((d["color"], False,
+                                f"mutant   \u0394area {area:.0f} \u00b0C\u00b7bp",
+                                d.get("name")))
         if not entries:
             self._legend_lines = 0
+            self._legend_texts = []
             return
+        self._legend_texts = [t for _c, _sol, t, _d in entries]
         qp.setFont(QFont("Helvetica", 8))
         fm = qp.fontMetrics()
         row_h = fm.height() + 4
@@ -359,12 +368,27 @@ class MeltChart(QWidget):
             qp.drawText(int(x - 14), int(pad_t + plot_h + 2), 28, 12,
                         Qt.AlignHCenter, str(b + 1))
         qp.setPen(QColor("#999"))
-        qp.drawText(int(w - pad_r - 200), h - 13, 200, 12,
+        qp.drawText(int(w - pad_r - 240), h - 13, 240, 12,
                     Qt.AlignRight,
-                    "amplicon base 1…N · wheel/± zoom · drag pan · "
+                    "drag box zoom · shift/mid-drag pan · wheel/± zoom · "
                     "double-click reset")
 
         self._draw_legend(qp, plot_w, plot_h)
+        if self._rubber is not None:
+            self._draw_rubber(qp, plot_w, plot_h)
+
+    def _draw_rubber(self, qp, plot_w, plot_h):
+        r = self._rubber
+        w, h = self.width(), self.height()
+        x = max(r.left(), self._pad_l)
+        y = max(r.top(), self._pad_t)
+        x2 = min(r.right(), w - self._pad_r)
+        y2 = min(r.bottom(), self._pad_t + plot_h)
+        if x2 - x < 1 or y2 - y < 1:
+            return
+        qp.setBrush(QColor(90, 160, 220, 55))
+        qp.setPen(QPen(QColor(50, 120, 190), 1.2))
+        qp.drawRect(int(x), int(y), int(x2 - x), int(y2 - y))
 
     # ---------------------------------------------------------- interactions - #
     def wheelEvent(self, event):                        # noqa: N802
@@ -381,24 +405,87 @@ class MeltChart(QWidget):
 
     def mousePressEvent(self, event):                   # noqa: N802
         if event.button() == Qt.LeftButton:
-            self._drag = (event.position().x(), event.position().y(),
-                          self._view_x0, self._view_x1,
-                          self._view_y0, self._view_y1)
+            if event.modifiers() & Qt.ShiftModifier:
+                # Shift+drag pans (like the middle button); plain left-drag
+                # rubber-bands a zoom rectangle.
+                self._rubber = None
+                self._pan = (event.position().x(), event.position().y(),
+                             self._view_x0, self._view_x1,
+                             self._view_y0, self._view_y1)
+            else:
+                self._pan = None
+                px, py = event.position().x(), event.position().y()
+                self._rubber = QRectF(px, py, 0.0, 0.0)
+            event.accept()
+        elif event.button() == Qt.MiddleButton:
+            self._rubber = None
+            self._pan = (event.position().x(), event.position().y(),
+                         self._view_x0, self._view_x1,
+                         self._view_y0, self._view_y1)
             event.accept()
 
     def mouseMoveEvent(self, event):                    # noqa: N802
-        if self._drag is not None:
-            x_0, y_0, vx0, vx1, vy0, vy1 = self._drag
+        if self._pan is not None:
+            x_0, y_0, vx0, vx1, vy0, vy1 = self._pan
             plot_w = max(self.width() - self._pad_l - self._pad_r, 1)
             plot_h = max(self.height() - self._pad_t - self._pad_b, 1)
             spanx, spany = vx1 - vx0, vy1 - vy0
             shift_x = spanx * (event.position().x() - x_0) / plot_w
             shift_y = spany * (event.position().y() - y_0) / plot_h
             self._clamp_view(vx0 - shift_x, vy0 + shift_y)
+        elif self._rubber is not None:
+            r = self._rubber
+            r.setRight(event.position().x())
+            r.setBottom(event.position().y())
+            self._rubber = r.normalized()
+            self.update()
 
     def mouseReleaseEvent(self, event):                 # noqa: N802
-        self._drag = None
+        if event.button() == Qt.LeftButton \
+                and self._rubber is not None:
+            rect = self._rubber
+            self._rubber = None
+            self.update()
+            if rect.width() >= 6 and rect.height() >= 6:
+                self._zoom_rect(rect)
+        elif self._pan is not None:
+            self._pan = None
+
+    def keyPressEvent(self, event):                     # noqa: N802
+        if event.key() == Qt.Key_Escape and self._rubber is not None:
+            self._rubber = None
+            self.update()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
 
     def mouseDoubleClickEvent(self, event):             # noqa: N802
+        self._rubber = None
         self.fit()
         event.accept()
+
+    def _zoom_rect(self, rect):
+        """Zoom the plot so the on-screen rectangle *rect* (pixel coords,
+        plot-area coordinate space) fills the view.  Tiny rectangles are
+        rejected so an accidental click never collapses the axis."""
+        plot_w = max(self.width() - self._pad_l - self._pad_r, 1)
+        plot_h = max(self.height() - self._pad_t - self._pad_b, 1)
+        pad_l, pad_t = self._pad_l, self._pad_t
+        x = min(max(rect.left(), pad_l), pad_l + plot_w)
+        x2 = min(max(rect.right(), pad_l), pad_l + plot_w)
+        y = min(max(rect.top(), pad_t), pad_t + plot_h)
+        y2 = min(max(rect.bottom(), pad_t), pad_t + plot_h)
+        if x2 - x < 6 or y2 - y < 6:
+            return
+        spanx = self._view_x1 - self._view_x0
+        spany = self._view_y1 - self._view_y0
+        vx = self._view_x0 + (x - pad_l) / plot_w * spanx
+        vy = self._view_y0 + (plot_h - (y - pad_t)) / plot_h * spany
+        new_spanx = spanx * (x2 - x) / plot_w
+        new_spany = spany * (y2 - y) / plot_h
+        if new_spanx < 2.0 or new_spany < 1.5:
+            return
+        self._view_x0, self._view_x1 = vx, vx + new_spanx
+        self._view_y0, self._view_y1 = vy, vy + new_spany
+        self._clamp_view(self._view_x0, self._view_y0)
+        self.update()

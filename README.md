@@ -60,7 +60,16 @@ opens a saved project on start.
   (wildtype solid, mutant dashed) with a legend, so several melt maps can
   be compared side by side under the same conditions (CTCE).  The
   melt-separation area between the wt and mutant curves of each pair is
-  filled in that item's colour.
+  filled in that item's colour and quoted as a number
+  (**Δarea, °C·bp**) in the legend, the table and the info panel — a
+  compact "how far apart do the alleles melt" metric.
+- Melting-shape flagging: a valley under the clamp gradient (dip) is
+  detected per amplicon and flagged with a ⚠ in the list, the info panel,
+  the table and the legend, so a panel that is unsuitable for CTCE reads
+  at a glance.
+- Pasting works with the plain headers `>wt` / `>mut` (or `>ref` /
+  `>alt`), no `_suffix_` base name required, and pairs like
+  `name_wt`/`name_mut` as before.
 - Fragments are aligned on their amplicon frame, so the GC clamp never
   shifts the amplicon: the clamp is drawn as a grey tail *outside* the
   frame (base-ruler at the bottom labels your amplicon base positions) —
@@ -70,8 +79,10 @@ opens a saved project on start.
   are the bare 20-mers (with a 42-base left clamp the forward primer
   starts at amplicon base 43) and no primer or mutation markers clutter
   the lines.
-- Zoom & pan the plot: mouse wheel or the +/− buttons zoom in/out, drag
-  pans, double-click (or *Reset*) shows everything again.
+- Zoom & pan the plot: drag a box with the left button to zoom into that
+  region, mouse wheel or the +/− buttons zoom around the cursor, shift+drag
+  (or middle-drag) pans, and double-click (or *Reset*) shows everything
+  again.
 - Live adjustment: change the salt (Na+) or the selected amplicon's GC
   clamp and the map, Tm and primer set re-plot right away.
 - The **primer table** under the chart is editable in place and has a

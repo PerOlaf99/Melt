@@ -21,7 +21,7 @@ _SUPPORTED = [("varmelt project (*.varmelt.json)", "*.varmelt.json"),
               ("JSON files (*.json)", "*.json")]
 _CSV_HEAD = ["name", "kind", "forward primer", "reverse primer",
              "fwd tm", "rev tm", "product start", "product end",
-             "length", "mean tm", "gc clamp", "melting shape"]
+             "length", "mean tm", "delta area", "gc clamp", "melting shape"]
 
 
 def _file_filters() -> str:
@@ -173,11 +173,11 @@ class MainWindow(QMainWindow):
         header.addWidget(b_csv)
         rlay.addLayout(header)
 
-        self.table = QTableWidget(0, 11)
+        self.table = QTableWidget(0, 12)
         self.table.setHorizontalHeaderLabels(
             ["Amplicon", "Forward primer", "Reverse primer", "Fwd Tm",
              "Rev Tm", "Product start", "Product end", "Length (bp)",
-             "Mean Tm", "GC clamp", "Melting shape"])
+             "Mean Tm", "Δarea (°C·bp)", "GC clamp", "Melting shape"])
         self.table.verticalHeader().setVisible(False)
         self.table.setMinimumHeight(140)
         self.table.setMaximumHeight(260)
@@ -391,6 +391,9 @@ class MainWindow(QMainWindow):
                 "clamp_side": fd["clamp_side"],
                 "mark_idx": fd["mark_idx"],
                 "indel": fd["indel"],
+                "delta_area": float(it.result.get("delta_area", 0.0) or 0.0),
+                "dip": bool(str(it.result.get("melting_shape") or "")
+                            .startswith("dip")),
                 "color": color,
             })
         self.chart.set_datasets(datasets)
@@ -510,8 +513,10 @@ class MainWindow(QMainWindow):
                 pair.product_end if pair else "",
                 pair.product_length if pair else "",
                 f"{pair.avg_tm:.2f}" if pair and pair.avg_tm else "",
+                f"{r.get('delta_area', 0.0):.1f}",
                 pair.clamp_position or "none" if pair else "",
-                pair.melting_shape or "n/a" if pair else ""]
+                r.get("melting_shape") or (pair.melting_shape if pair
+                                           else "single strand") or "n/a"]
 
     # ----------------------------------------------------- compute / view - #
     def _current_item(self) -> Item:
@@ -547,6 +552,9 @@ class MainWindow(QMainWindow):
                         if pair.clamp_position:
                             label += f", {pair.clamp_position} clamp"
                         label += ")"
+                    if str(it.result.get("melting_shape") or "") \
+                            .startswith("dip"):
+                        label += "  \u26a0 valley"
                 item = QListWidgetItem(label)
                 item.setData(Qt.UserRole, it)
                 item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
@@ -649,11 +657,19 @@ class MainWindow(QMainWindow):
         altnote = (f"  ({r['wt_len']} bp wt vs {r['mut_len']} bp mutant, "
                    f"diff at base {r['mut_idx'] + 1})"
                    if r.get("paired") else "")
+        shape = str(r.get("melting_shape") or "")
+        area = float(r.get("delta_area", 0.0) or 0.0)
+        metrics = ""
+        if r.get("paired"):
+            metrics += f" &nbsp; \u0394area <b>{area:.0f}</b> \u00b0C\u00b7bp"
+        if shape.startswith("dip"):
+            metrics += (" &nbsp; <span style='color:#b33410;"
+                        "font-weight:bold'>\u26a0 {}</span>".format(shape))
         self.info.setText(
             f"<b>{it.name}</b> — {kind}, {dnalen} bp{altnote}<br>"
             f"forward primer <code>{r['fp']}</code> &nbsp; reverse primer "
             f"<code>{r['rp']}</code> &nbsp; clamp "
-            f"<b>{it.clamp_side() or 'none'}</b>")
+            f"<b>{it.clamp_side() or 'none'}</b>{metrics}")
 
     def _render_table(self):
         """Primer-set table: one row per computed amplicon (so every added
@@ -676,13 +692,16 @@ class MainWindow(QMainWindow):
                 cols += [pair.product_start, pair.product_end,
                          pair.product_length,
                          f"{pair.avg_tm:.2f}" if pair.avg_tm else "",
+                         f"{res.get('delta_area', 0.0):.1f}",
                          pair.clamp_position or "none",
-                         pair.melting_shape or "n/a"]
+                         res.get("melting_shape") or pair.melting_shape
+                         or "n/a"]
             else:
                 cols += ["", "", len(res["refseq"]),
                          f"{res['ref_mean_tm']:.2f}",
+                         "0.0",
                          res.get("clamp", "none"),
-                         "single strand"]
+                         res.get("melting_shape") or "single strand"]
             for c, val in enumerate(cols):
                 self.table.setItem(r, c, QTableWidgetItem(str(val)))
 

@@ -56,8 +56,9 @@ class AddSequenceDialog(QDialog):
                           "First 20 bases = forward primer; reverse "
                           "complement of last 20 = reverse primer.  Names "
                           "ending <b>_wt</b>/<b>_mut</b> (or _ref/_alt) with "
-                          "the same base name are paired and plotted "
-                          "together.</span>")
+                          "the same base name, or bare headers "
+                          "<b>&gt;wt</b>/<b>&gt;mut</b>, are paired and "
+                          "plotted together.</span>")
         help_lbl.setWordWrap(True)
         form.addRow("Name", self.name_edit)
         form.addRow("Sequence(s)", self.seq_edit)

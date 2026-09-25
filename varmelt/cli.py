@@ -524,6 +524,7 @@ def analyze_sequence(dna: str, name: str = "pasted amplicon",
         "idx": None, "fallback": False,
         "seq_mode": True, "name": name, "dnalen": len(dna),
         "fp": fp, "rp": rp, "clamp": side or "none", "label": name,
+        "melting_shape": it.melting_shape or "n/a", "delta_area": 0.0,
     }
 
 
@@ -576,6 +577,16 @@ def analyze_sequence_pair(wt: str, mut: str, name: str = "pasted wt/mut pair",
     rows = [it.to_row()]
 
     indel = len(wt) - len(mut)
+    # CTCE peak separation: integrated |wt - mutant| map over the amplicon,
+    # aligned at the first differing base (mut index j = ref index k - indel).
+    delta_area = 0.0
+    for k, rt in enumerate(ref_prof):
+        j = k if k < i else k - indel
+        if 0 <= j < len(alt_prof) and rt is not None \
+                and not math.isnan(rt) \
+                and alt_prof[j] is not None and not math.isnan(alt_prof[j]):
+            delta_area += abs(alt_prof[j] - rt)
+    delta_area = round(delta_area, 1)
     base = None
     if outdir is not None:
         import hashlib as _hashlib
@@ -607,6 +618,8 @@ def analyze_sequence_pair(wt: str, mut: str, name: str = "pasted wt/mut pair",
         "dnalen": len(wt), "wt_len": len(wt), "mut_len": len(mut),
         "mut_idx": i, "fp": fp, "rp": rp, "clamp": side or "none",
         "delta": alt_mean - ref_mean, "label": name,
+        "melting_shape": it.melting_shape or "n/a",
+        "delta_area": delta_area,
     }
 
 

@@ -122,6 +122,51 @@ def test_pairing_grouping():
     assert items[2]["name"] == "r2"
 
 
+def test_pair_bare_headers():
+    recs = webapp._parse_fasta(">Wt\n" + "A" * 50 + "\n>mut\n"
+                               + "G" + "A" * 49 + "\n>solo\n" + "C" * 50)
+    items = webapp._pair_sequences(recs)
+    assert [i["kind"] for i in items] == ["pair", "seq"], items
+    assert items[0]["name"] == "Wt/mut"
+    assert items[0]["wt"] == "A" * 50 and items[0]["mut"] == "G" + "A" * 49
+
+    # bare ref/alt and case-insensitivity
+    recs2 = webapp._parse_fasta(">REF\n" + "ACGT" * 20 + "\n>ALT\n"
+                                + "ACGT" * 19 + "T")
+    items2 = webapp._pair_sequences(recs2)
+    assert [i["kind"] for i in items2] == ["pair"], items2
+    assert items2[0]["name"] == "REF/ALT"
+
+    # a bare header never mixes with a suffixed name
+    recs3 = webapp._parse_fasta(">wt\n" + "A" * 50 + "\n>other_mut\n"
+                                + "G" + "A" * 49)
+    assert [i["kind"] for i in webapp._pair_sequences(recs3)] \
+        == ["seq", "seq"], webapp._pair_sequences(recs3)
+
+
+def test_delta_area_and_shape_keys():
+    wt = _dna(140)
+    while wt[76] == "A":
+        wt = _dna(140, seed="ACGTGATC")
+    mut = wt[:76] + "A" + wt[77:]
+    r = cli.analyze_sequence_pair(wt, mut, clamp="5'")
+    assert r["paired"] is True
+    assert isinstance(r["delta_area"], float) and r["delta_area"] > 0
+    assert isinstance(r["melting_shape"], str) \
+        and r["melting_shape"] not in ("", None)
+    s = cli.analyze_sequence(wt, clamp="5'")
+    assert s["delta_area"] == 0.0
+    assert s["melting_shape"] in ("flat/slope ok", "n/a")
+
+    # a sharp valley is flagged as a dip: GC-rich flanks surrounding an
+    # AT-rich middle give a descent-and-recovery map from the 5' clamp
+    seg = "GC" * 20 + "AT" * 20 + "GC" * 20
+    rv = cli.analyze_sequence_pair(seg, seg[:60] + "TG" + seg[62:],
+                                   clamp="5'")
+    assert rv["melting_shape"].startswith("dip"), rv["melting_shape"]
+    assert rv["delta_area"] > 0
+
+
 def _run_all():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]
