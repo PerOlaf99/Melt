@@ -103,27 +103,44 @@ class MeltChart(QWidget):
     # --------------------------------------------------------- zoom / pan - #
     def fit(self):
         self._view_x0, self._view_x1 = self._data_x0, self._data_x1
+        self._view_y0, self._view_y1 = self._data_y0, self._data_y1
         self.update()
 
     def reset(self):
         self.fit()
 
     def zoom_in(self):
-        self._zoom_at(0.5, 1.5)
+        self._zoom_xy(0.5, 0.5, 1.5, 1.5)
 
     def zoom_out(self):
-        self._zoom_at(0.5, 1.0 / 1.5)
+        self._zoom_xy(0.5, 0.5, 1.0 / 1.5, 1.0 / 1.5)
 
-    def _zoom_at(self, frac, mag):
-        """Divide the visible x-span by *mag* around cursor fraction *frac*."""
+    def _zoom_xy(self, x_frac, y_frac, xmag, ymag):
+        """Divide the visible spans by *mag* around the given fractions;
+        the view is kept inside the data ranges."""
         x0, x1 = self._view_x0, self._view_x1
-        span = (x1 - x0) / mag
-        if span < 2.0 or span > 5.0 * (self._data_x1 - self._data_x0):
-            return
-        cx = x0 + (x1 - x0) * frac
-        self._view_x0 = cx - span * frac
-        self._view_x1 = self._view_x0 + span
+        y0, y1 = self._view_y0, self._view_y1
+        dx, dy = self._data_x1 - self._data_x0, self._data_y1 - self._data_y0
+        spanx, spany = (x1 - x0) / xmag, (y1 - y0) / ymag
+        if 2.0 <= spanx <= 5.0 * dx and 1.5 <= spany <= 5.0 * dy:
+            cx = x0 + (x1 - x0) * x_frac
+            cy = y0 + (y1 - y0) * y_frac
+            self._view_x0 = cx - spanx * x_frac
+            self._view_x1 = self._view_x0 + spanx
+            self._view_y0 = cy - spany * y_frac
+            self._view_y1 = self._view_y0 + spany
         self.update()
+
+    def _clamp_view(self, vx0, vy0):
+        dx = self._data_x1 - self._data_x0
+        spanx = self._view_x1 - self._view_x0
+        spanx = min(spanx, dx)
+        vx0 = min(max(vx0, self._data_x0), self._data_x1 - spanx)
+        dy = self._data_y1 - self._data_y0
+        spany = min(self._view_y1 - self._view_y0, dy)
+        vy0 = min(max(vy0, self._data_y0), self._data_y1 - spany)
+        self._view_x0, self._view_x1 = vx0, vx0 + spanx
+        self._view_y0, self._view_y1 = vy0, vy0 + spany
 
     # -- geometry ---------------------------------------------------------- #
     def _x(self, v, plot_w):
@@ -353,29 +370,31 @@ class MeltChart(QWidget):
     def wheelEvent(self, event):                        # noqa: N802
         pos = event.position()
         plot_w = max(self.width() - self._pad_l - self._pad_r, 1)
-        frac = max((pos.x() - self._pad_l) / plot_w, 0.0)
-        frac = min(frac, 1.0)
+        plot_h = max(self.height() - self._pad_t - self._pad_b, 1)
+        x_frac = min(max((pos.x() - self._pad_l) / plot_w, 0.0), 1.0)
+        y_frac = min(max((pos.y() - self._pad_t) / plot_h, 0.0), 1.0)
         delta = event.angleDelta().y()
         if delta:
-            self._zoom_at(frac, 1.35 if delta > 0 else 1.0 / 1.35)
+            mag = 1.35 if delta > 0 else 1.0 / 1.35
+            self._zoom_xy(x_frac, y_frac, mag, mag)
         event.accept()
 
     def mousePressEvent(self, event):                   # noqa: N802
         if event.button() == Qt.LeftButton:
-            self._drag = (event.position().x(),
-                          self._view_x0, self._view_x1)
+            self._drag = (event.position().x(), event.position().y(),
+                          self._view_x0, self._view_x1,
+                          self._view_y0, self._view_y1)
             event.accept()
 
     def mouseMoveEvent(self, event):                    # noqa: N802
         if self._drag is not None:
-            x_0, vx0, vx1 = self._drag
+            x_0, y_0, vx0, vx1, vy0, vy1 = self._drag
             plot_w = max(self.width() - self._pad_l - self._pad_r, 1)
-            dx = event.position().x() - x_0
-            span = vx1 - vx0
-            dspan = span * dx / plot_w
-            self._view_x0 = max(self._data_x0, vx0 - dspan)
-            self._view_x1 = min(self._data_x1, vx1 - dspan)
-            self.update()
+            plot_h = max(self.height() - self._pad_t - self._pad_b, 1)
+            spanx, spany = vx1 - vx0, vy1 - vy0
+            shift_x = spanx * (event.position().x() - x_0) / plot_w
+            shift_y = spany * (event.position().y() - y_0) / plot_h
+            self._clamp_view(vx0 - shift_x, vy0 + shift_y)
 
     def mouseReleaseEvent(self, event):                 # noqa: N802
         self._drag = None

@@ -133,14 +133,28 @@ def test_chart_renders_png():
     # zoom in/out works and reset restores the full view
     x0, x1 = ch._view_x0, ch._view_x1
     span0 = x1 - x0
+    yspan0 = ch._view_y1 - ch._view_y0
     ch.zoom_in()
     ok(ch._view_x1 - ch._view_x0 < span0, "zoom in narrows the x view")
+    ok(ch._view_y1 - ch._view_y0 < yspan0, "zoom in narrows the y axis too")
     ch.zoom_out()
     ok(ch._view_x1 - ch._view_x0 > 0.9 * span0,
        "zoom out widens back towards the data span")
     ch.reset()
     ok(ch._view_x0 == ch._data_x0 and ch._view_x1 == ch._data_x1,
        "reset returns to the full data span")
+    ok(ch._view_y0 == ch._data_y0 and ch._view_y1 == ch._data_y1,
+       "reset returns the y axis to the full Tm range")
+
+    # the primer table lists every computed fragment, not just the selected
+    win._render_table()
+    ok(win.table.rowCount() == 2, "primer table row per computed item")
+    ok(win.table.item(0, 0).text() == "frag"
+       and win.table.item(1, 0).text() == "frag_pair",
+       "amplicon names in the first column")
+    ok(win.table.item(0, 1).text() == SEQ[:20],
+       "forward primer still the bare 20-mer")
+    ok(win.table.item(1, 7).text() == "80", "pair column: length 80 bp")
 
     # untick the pair -> a single dataset remains
     win.project.items[1].plot = False
@@ -265,7 +279,7 @@ def test_buttons_and_table():
             & (QAbstractItemView.DoubleClicked
                | QAbstractItemView.EditKeyPressed)),
        "primer table cells are editable")
-    ok(win.table.item(0, 0).text() == SEQ[:20],
+    ok(win.table.item(0, 1).text() == SEQ[:20],
        "table shows the bare forward primer")
     text = win._copy_table()
     ok(text is not None and "Forward primer" in text
@@ -274,7 +288,7 @@ def test_buttons_and_table():
 
     # manual edit to a cell is not clobbered by the next render
     win.table.setItem(0, 1, QTableWidgetItem("CUSTOM-RP"))
-    win._render_item(win.project.items[0])
+    win._render_table()
     ok(win.table.item(0, 1).text() == SEQ[:20],
        "render refreshes primers for the current item")
 

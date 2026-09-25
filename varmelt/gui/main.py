@@ -173,14 +173,14 @@ class MainWindow(QMainWindow):
         header.addWidget(b_csv)
         rlay.addLayout(header)
 
-        self.table = QTableWidget(0, 10)
+        self.table = QTableWidget(0, 11)
         self.table.setHorizontalHeaderLabels(
-            ["Forward primer", "Reverse primer", "Fwd Tm", "Rev Tm",
-             "Product start", "Product end", "Length (bp)", "Mean Tm",
-             "GC clamp", "Melting shape"])
+            ["Amplicon", "Forward primer", "Reverse primer", "Fwd Tm",
+             "Rev Tm", "Product start", "Product end", "Length (bp)",
+             "Mean Tm", "GC clamp", "Melting shape"])
         self.table.verticalHeader().setVisible(False)
-        self.table.setMinimumHeight(110)
-        self.table.setMaximumHeight(230)
+        self.table.setMinimumHeight(140)
+        self.table.setMaximumHeight(260)
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setSelectionBehavior(QAbstractItemView.SelectItems)
@@ -188,7 +188,7 @@ class MainWindow(QMainWindow):
                                    | QAbstractItemView.EditKeyPressed)
         head = self.table.horizontalHeader()
         head.setSectionResizeMode(QHeaderView.Interactive)
-        for c in (0, 1):
+        for c in (1, 2):
             head.setSectionResizeMode(c, QHeaderView.Stretch)
         head.setMinimumSectionSize(70)
         rlay.addWidget(self.table)
@@ -363,6 +363,7 @@ class MainWindow(QMainWindow):
         self.path = None
         self._refresh_list()
         self._render_plots()
+        self._render_table()
         self.info.setText("no item selected")
         self.statusBar().showMessage("new project")
 
@@ -443,7 +444,11 @@ class MainWindow(QMainWindow):
         self.path = p
         self.na_spin.setValue(self.project.na)
         self.clamp_combo.setCurrentIndex(0)
+        for it in self.project.items:
+            it.compute(self.project.na)
         self._refresh_list()
+        self._render_plots()
+        self._render_table()
         if self.project.items:
             self._select_index(0)
         self._update_title()
@@ -613,7 +618,7 @@ class MainWindow(QMainWindow):
         it = self._current_item()
         if it is None:
             self._render_plots()
-            self.table.setRowCount(0)
+            self._render_table()
             self.info.setText("no item selected")
             return
         self.statusBar().showMessage(f"computing {it.name} …")
@@ -621,7 +626,8 @@ class MainWindow(QMainWindow):
         it.compute(self.project.na)
         self._refresh_list()
         self._render_plots()
-        self._render_item(it)
+        self._render_table()
+        self._render_info(it)
         if it.error:
             self.statusBar().showMessage(
                 f"{it.name}: {it.error}", 6000)
@@ -630,9 +636,8 @@ class MainWindow(QMainWindow):
                 f"{it.name} ready — mean Tm "
                 f"{it.result['ref_mean_tm']:.2f} °C", 2000)
 
-    def _render_item(self, it: Item):
+    def _render_info(self, it: Item):
         if it.error or not it.result:
-            self.table.setRowCount(0)
             self.info.setText(f"{it.name}: {it.error}" if it.error
                               else "no data")
             return
@@ -650,18 +655,36 @@ class MainWindow(QMainWindow):
             f"<code>{r['rp']}</code> &nbsp; clamp "
             f"<b>{it.clamp_side() or 'none'}</b>")
 
-        self.table.setRowCount(1)
-        fp_raw = r.get("fp") or (pair.fp_seq if pair else "")
-        rp_raw = r.get("rp") or (pair.rp_seq if pair else "")
-        cols = [fp_raw, rp_raw,
-                f"{pair.fp_tm_melt:.2f}" if pair.fp_tm_melt else "",
-                f"{pair.rp_tm_melt:.2f}" if pair.rp_tm_melt else "",
-                pair.product_start, pair.product_end, pair.product_length,
-                f"{pair.avg_tm:.2f}" if pair.avg_tm else "",
-                pair.clamp_position or "none",
-                pair.melting_shape or "n/a"]
-        for c, val in enumerate(cols):
-            self.table.setItem(0, c, QTableWidgetItem(str(val)))
+    def _render_table(self):
+        """Primer-set table: one row per computed amplicon (so every added
+        sequence shows up, not just the selected one)."""
+        rows = [it for it in self.project.items
+                if it.result and not it.error]
+        self.table.setRowCount(len(rows))
+        for r, it in enumerate(rows):
+            pair = it.pair()
+            res = it.result
+            pairwise = bool(res.get("paired"))
+            fp_raw = res.get("fp") or (pair.fp_seq if pair else "")
+            rp_raw = res.get("rp") or (pair.rp_seq if pair else "")
+            cols = [it.name, fp_raw, rp_raw,
+                    f"{pair.fp_tm_melt:.2f}" if pair and pair.fp_tm_melt
+                    else "",
+                    f"{pair.rp_tm_melt:.2f}" if pair and pair.rp_tm_melt
+                    else ""]
+            if pairwise and pair:
+                cols += [pair.product_start, pair.product_end,
+                         pair.product_length,
+                         f"{pair.avg_tm:.2f}" if pair.avg_tm else "",
+                         pair.clamp_position or "none",
+                         pair.melting_shape or "n/a"]
+            else:
+                cols += ["", "", len(res["refseq"]),
+                         f"{res['ref_mean_tm']:.2f}",
+                         res.get("clamp", "none"),
+                         "single strand"]
+            for c, val in enumerate(cols):
+                self.table.setItem(r, c, QTableWidgetItem(str(val)))
 
     def _about(self):
         QMessageBox.about(self, "varmelt melt",
