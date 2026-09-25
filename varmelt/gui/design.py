@@ -144,14 +144,16 @@ class DesignDialog(QDialog):
              "FP/RP Tm", "Clamp", "3' dbSNP"])
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SingleSelection)
-        self.table.doubleClicked.connect(lambda *_: self._add_selected())
+        self.table.setSelectionMode(QTableWidget.ExtendedSelection)
+        self.table.doubleClicked.connect(self._on_double_click)
         self.table.itemSelectionChanged.connect(self._sync_add_btn)
         for c, w in enumerate((150, 45, 70, 130, 70, 80, 50, 140)):
             self.table.setColumnWidth(c, w)
 
         add_row = QHBoxLayout()
         self.add_btn = QPushButton("Add &selected")
+        self.add_btn.setToolTip(
+            "Ctrl/Shift click to select several rows, then add them together")
         self.add_btn.clicked.connect(self._add_selected)
         self.add_btn.setEnabled(False)
         self.add_best_btn = QPushButton("Add best of &each variant")
@@ -269,15 +271,30 @@ class DesignDialog(QDialog):
 
     # ------------------------------------------------------------- add - #
     def _sync_add_btn(self):
-        self.add_btn.setEnabled(self.table.currentRow() >= 0)
+        self.add_btn.setEnabled(
+            bool(self._cands)
+            and len(self.table.selectionModel().selectedRows()) > 0)
 
     def _variant_key(self, c) -> str:
         return c.rsid or f"{c.chrom}:{c.pos} {c.ref}>{c.alt}"
 
-    def _add_selected(self):
-        row = self.table.currentRow()
+    def _add_row(self, row):
         if 0 <= row < len(self._cands):
             self.candidate.emit(self._cands[row])
+
+    def _on_double_click(self, _index):
+        self._add_row(self.table.currentRow())
+
+    def _add_selected(self):
+        rows = sorted({i.row()
+                       for i in self.table.selectionModel().selectedRows()})
+        cands = [self._cands[r] for r in rows if 0 <= r < len(self._cands)]
+        if not cands:
+            return
+        if len(cands) == 1:
+            self.candidate.emit(cands[0])
+        else:
+            self.candidates.emit(cands)
 
     def _add_best_each(self):
         best = {}

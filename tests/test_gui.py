@@ -720,6 +720,47 @@ def test_design_import_list():
         dlg.close()
 
 
+def test_design_multi_select_add():
+    """Ctrl/Shift multi-selection adds every chosen candidate at once."""
+    from PySide6.QtCore import QItemSelectionModel
+    from PySide6.QtWidgets import QApplication, QTableWidgetItem
+    from varmelt.gui.main import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+
+    def mk(i):
+        return type("C", (), {
+            "name": f"c{i}", "chrom": "chr7" if not i else "chr16",
+            "pos": 140453136 if not i else 30391275, "rsid": None,
+            "ref": "T", "alt": "A", "fp": "FP", "rp": "RP", "ps": 0, "pe": 1,
+            "wt_amp": "ACGT" * 30,
+            "mut_amp": "ACGT" * 29 + "TGCA", "ft": 60.0,
+            "rt": 61.0, "clamp": "5'", "shape": "ok", "snps_3prime": "none",
+            "delta_area": 12.4, "score": 95 - i})()
+
+    win = MainWindow()
+    win._open_design()
+    dlg = win._design_dlg
+    dlg._cands = [mk(0), mk(1), mk(2)]
+    dlg.table.setRowCount(3)
+    for r, c in enumerate(dlg._cands):
+        dlg.table.setItem(r, 0, QTableWidgetItem(c.name))
+    sm = dlg.table.selectionModel()
+    model = dlg.table.model()
+    for row in (0, 2):
+        sm.select(model.index(row, 0),
+                  QItemSelectionModel.Select | QItemSelectionModel.Rows)
+    app.processEvents()
+    ok(dlg.add_btn.isEnabled()
+       and len(dlg.table.selectionModel().selectedRows()) == 2,
+       "Add enabled for a Ctrl multi-selection")
+    n = [0]
+    dlg.candidates.connect(lambda cands: n.__setitem__(0, len(cands)))
+    dlg._add_selected()
+    ok(n[0] == 2, "Add selected emits the two chosen candidates")
+    dlg.close()
+
+
 if __name__ == "__main__":
     test_model_compute_roundtrip()
     test_project_schema()
@@ -732,6 +773,7 @@ if __name__ == "__main__":
     test_example_menu_braf_silent_vs_v600e()
     test_design_dialog_adds_candidate()
     test_design_import_list()
+    test_design_multi_select_add()
     test_buttons_and_table()
     print("\n" + ("ALL GUI TESTS PASSED" if failures == 0
                   else f"{failures} FAILURE(S)"))
