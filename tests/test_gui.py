@@ -622,6 +622,54 @@ def test_example_menu_braf_silent_vs_v600e():
        "context line paints the V600E T->A red at base 81")
 
 
+def test_design_dialog_adds_candidate():
+    from varmelt import design as dmod
+    from varmelt.gui import design as gd
+    from varmelt.gui.examples import BRAF_FLAT_VS_SLOPED
+    from PySide6.QtWidgets import QApplication
+    from varmelt.gui.main import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    wt = BRAF_FLAT_VS_SLOPED
+    mut = wt[:12] + "A" + wt[13:]
+    cand = dmod.Candidate(
+        name="chr7:140453136 T>G — 74 bp fragment, flat/slope ok",
+        chrom="chr7", pos=140453136, rsid="rs113488022", ref="T", alt="G",
+        fp=wt[:20], rp=wt[-20:], ps=0, pe=len(wt) - 1,
+        product_len=len(wt), fragment_len=len(wt) + 42,
+        ft=60.0, rt=61.0, clamp="3'",
+        shape="flat/slope ok", snps_3prime="none",
+        delta_area=12.4, wt_amp=wt, mut_amp=mut, score=95)
+    result = dmod.DesignResult([cand], "chr7", 140453136, "T", "G",
+                               "rs113488022", "hg38", 0, len(wt) - 1,
+                               False)
+    routed = {}
+    gd._run_design_sync = lambda params: (routed.update(params) or result)
+
+    win = MainWindow()
+    win._open_design()
+    dlg = win._design_dlg
+    ok(dlg is not None, "Design menu opens the dialog")
+    dlg._on_design()
+    dlg._thread.wait()
+    app.processEvents()
+    ok(len(routed) >= 2 and routed["na"] == 0.013, "form params built")
+    ok(dlg.table.rowCount() == 1 and dlg.table.item(0, 0).text() == "95",
+       "candidate row is populated")
+    dlg.table.selectRow(0)
+    app.processEvents()
+    ok(dlg.add_btn.isEnabled(), "Add is enabled once a row is selected")
+    dlg._add_selected()
+    app.processEvents()
+    ok(len(win.project.items) == 1, "add puts the candidate in the project")
+    it = win.project.items[0]
+    ok(it.kind == "pair" and it.result and it.result.get("paired"),
+       "added item computes as a pair")
+    ok(it.clamp_side() == "3'", "the designed clamp side is honoured")
+    ok(len(win.chart._datasets) >= 1, "the fragment is plotted")
+    dlg.close()
+
+
 if __name__ == "__main__":
     test_model_compute_roundtrip()
     test_project_schema()

@@ -209,6 +209,10 @@ class MainWindow(QMainWindow):
         m_file.addSeparator()
         self._add_action(m_file, "&Quit", self.close, "Ctrl+Q")
 
+        m_des = self.menuBar().addMenu("&Design")
+        self._add_action(m_des, "Fragment design…", self._open_design,
+                         "Ctrl+D")
+
         m_exp = self.menuBar().addMenu("&Examples")
         self._add_action(m_exp, "BRAF 127 bp flat vs sloped",
                          self._load_example_braf)
@@ -289,6 +293,36 @@ class MainWindow(QMainWindow):
             "BRAF silent T->A at base 28: dTm ~ 0.0000 C, delta-area 0.1 "
             "C*bp -- the same T->A as V600E, but here the curve does not "
             "move at all", 6000)
+
+    def _open_design(self):
+        """Open the fragment-design dialog (one instance, stays open)."""
+        from .design import DesignDialog
+        dlg = getattr(self, "_design_dlg", None)
+        if dlg is None:
+            dlg = DesignDialog(self)
+            dlg.candidate.connect(self._add_designed)
+            self._design_dlg = dlg
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
+    def _add_designed(self, cand):
+        """Append a designed candidate to the project as a normal pair item."""
+        from .model import Item
+        it = Item(kind="pair", name=cand.name, wt=cand.wt_amp,
+                  mut=cand.mut_amp, clamp=cand.clamp or "5'")
+        it.compute(self.project.na)
+        if it.error:
+            QMessageBox.warning(self, "varmelt melt",
+                                f"{cand.name}:\n{it.error}")
+            return
+        self.project.add(it)
+        self._refresh_list()
+        self._render_plots()
+        self._render_table()
+        self._select_index(len(self.project.items) - 1)
+        self.statusBar().showMessage(
+            f"designed fragment added: {cand.name}", 6000)
 
     def _rename_item(self):
         it = self._current_item()

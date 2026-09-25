@@ -103,6 +103,13 @@ opens a saved project on start.
 - The paste-a-sequence analysis matches the CLI/web `analyze_sequence`
   mode: names ending `_wt`/`_mut` (or `_ref`/`_alt`) are plotted together
   as a wildtype/mutant pair aligned at their first differing base.
+- The **Design → Fragment design…** dialog runs the engine's automated
+  design (Primer3 over the product-size windows, dbSNP-filtered primer 3'
+  ends, clean-slope GC-clamp side) on a background thread for a dbSNP rsID
+  or a chromosome position, ranks the surviving candidates by a 0-100 score
+  (dip-free, wt/mutant resolvability, primer Tm, fragment length, dbSNP)
+  and "Add to project" drops the chosen fragment in as an ordinary
+  wildtype/mutant pair.
 
 ## Usage
 
@@ -274,6 +281,7 @@ dynamic-programming module anymore.
 ## Tests
 
 ```bash
+.venv/bin/python tests/test_design.py   # automated fragment design / scoring
 .venv/bin/python tests/test_fallback.py  # geometry / clamp / fallback design
 .venv/bin/python tests/test_inpcr.py     # seed-and-extend / specificity scan
 .venv/bin/python tests/test_sequence.py  # pasted-amplicon (primers + profiles)
