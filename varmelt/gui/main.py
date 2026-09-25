@@ -16,6 +16,7 @@ from .. import cli, webapp
 from .dialogs import AddPairDialog, AddSequenceDialog, EditItemDialog
 from .model import CLAMP_SIDES, Item, Project
 from .plot import MeltChart, PALETTE
+from . import help_docs
 
 _SUPPORTED = [("varmelt project (*.varmelt.json)", "*.varmelt.json"),
               ("JSON files (*.json)", "*.json")]
@@ -60,6 +61,9 @@ class MainWindow(QMainWindow):
         self.list.itemDoubleClicked.connect(lambda _: self._rename_item())
         self.list.itemChanged.connect(self._on_item_changed)
         self.list.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.list.setToolTip(
+            "Amplicons in this project. Select one to edit details;\n"
+            "use the checkbox (if shown) or selection to drive the overlay chart.")
         lay.addWidget(self.list)
 
         tip = QLabel("<small>tick a row to plot it — several charts are "
@@ -139,6 +143,10 @@ class MainWindow(QMainWindow):
 
         # single overlay plot with zoom controls
         self.chart = MeltChart()
+        self.chart.setToolTip(
+            "Melt map overlay: solid = reference, dashed = variant.\n"
+            "Wheel = zoom · Shift/middle-drag = pan · box-drag = zoom · "
+            "double-click = reset.")
         tools = QHBoxLayout()
         tools.addWidget(QLabel("<b>Melt maps</b> (overlaid)"))
         tools.addStretch(1)
@@ -222,6 +230,7 @@ class MainWindow(QMainWindow):
                          self._load_example_braf_silent)
 
         m_help = self.menuBar().addMenu("&Help")
+        self._add_action(m_help, "&User manual…", self._user_manual, "F1")
         self._add_action(m_help, "&About", self._about)
 
     def _add_action(self, menu: QMenu, text, slot, shortcut=None):
@@ -846,6 +855,22 @@ class MainWindow(QMainWindow):
                          res.get("melting_shape") or "single strand"]
             for c, val in enumerate(cols):
                 self.table.setItem(r, c, QTableWidgetItem(str(val)))
+
+    def _user_manual(self):
+        """Show the built-in HTML user manual (Help → User manual / F1)."""
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox
+        dlg = QDialog(self)
+        dlg.setWindowTitle(help_docs.MANUAL_TITLE)
+        dlg.resize(640, 520)
+        lay = QVBoxLayout(dlg)
+        browser = QTextBrowser()
+        browser.setOpenExternalLinks(True)
+        browser.setHtml(help_docs.MANUAL_HTML)
+        lay.addWidget(browser)
+        box = QDialogButtonBox(QDialogButtonBox.Ok)
+        box.accepted.connect(dlg.accept)
+        lay.addWidget(box)
+        dlg.exec()
 
     def _about(self):
         QMessageBox.about(self, "varmelt melt",

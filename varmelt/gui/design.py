@@ -11,8 +11,8 @@ ordinary wt/mut ``Item``, reusing the chart/info/primer-table rendering.
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
-                               QFormLayout, QFrame, QHBoxLayout, QLabel,
-                               QPlainTextEdit, QPushButton, QSpinBox,
+                               QFormLayout, QFrame, QHBoxLayout, QHeaderView,
+                               QLabel, QPlainTextEdit, QPushButton, QSpinBox,
                                QTableWidget, QTableWidgetItem, QVBoxLayout)
 
 SCORE_NOTE = ("Score 0-100: dip-free (45) + resolvable wt/mut difference "
@@ -25,6 +25,35 @@ SPEC_HINT = ("One variant per line.  Use a dbSNP rsID (coordinates are "
              "    chr16:30391275 T>C      (chrom:position ref>mutant)\n"
              "    chr7:140453136 G>A     run 2+ lines for a batch.\n"
              "Commas, blank lines or a lost newline (…T>Cchr12:…) are ok.")
+
+
+
+def _chrom_sort_key(chrom: str):
+    """Natural chromosome order: chr1..chr22, chrX, chrY, chrM, other."""
+    c = (chrom or "").strip()
+    low = c.lower()
+    if low.startswith("chr"):
+        low = low[3:]
+    if low.isdigit():
+        return (0, int(low), "")
+    order = {"x": 1, "y": 2, "m": 3, "mt": 3}
+    if low in order:
+        return (1, order[low], "")
+    return (2, 0, low)
+
+
+class SortableItem(QTableWidgetItem):
+    """QTableWidgetItem that sorts by Qt.UserRole when set (numeric / tuple)."""
+
+    def __lt__(self, other: QTableWidgetItem) -> bool:
+        a = self.data(Qt.UserRole)
+        b = other.data(Qt.UserRole) if other is not None else None
+        if a is not None and b is not None:
+            try:
+                return a < b
+            except TypeError:
+                pass
+        return super().__lt__(other)
 
 
 def _run_design_sync(specs, base, progress=None):
@@ -83,6 +112,9 @@ class DesignDialog(QDialog):
 
         form = QFormLayout()
         self.specs_edit = QPlainTextEdit()
+        self.specs_edit.setToolTip(
+            "One variant per line: rsID or chr:position ref>alt.\n"
+            "Example: chr7:140453136 A>T")
         self.specs_edit.setPlaceholderText(
             "rs113488022\nchr16:30391275 T>C\nchr7:140453136 G>A")
         self.specs_edit.setFixedHeight(92)
@@ -140,15 +172,23 @@ class DesignDialog(QDialog):
 
         self.table = QTableWidget(0, 8)
         self.table.setHorizontalHeaderLabels(
-            ["Variant", "Score", "Fragment", "Shape", "\u0394area",
+            ["Variant", "Score", "Fragment", "Shape", "Δarea",
              "FP/RP Tm", "Clamp", "3' dbSNP"])
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.ExtendedSelection)
+        self.table.setSortingEnabled(False)  # toggled around fills
+        hdr = self.table.horizontalHeader()
+        hdr.setSortIndicatorShown(True)
+        hdr.setSectionsClickable(True)
+        # Interactive + content-based widths; last column takes leftover space
+        hdr.setSectionResizeMode(QHeaderView.Interactive)
+        hdr.setStretchLastSection(True)
         self.table.doubleClicked.connect(self._on_double_click)
         self.table.itemSelectionChanged.connect(self._sync_add_btn)
-        for c, w in enumerate((150, 45, 70, 130, 70, 80, 50, 140)):
-            self.table.setColumnWidth(c, w)
+        self.table.setToolTip(
+            "Click column headers to sort (numeric for Score, length, Δarea, Tm).\n"
+            "Ctrl+click / Shift+click to select multiple rows, then Add selected.")
 
         add_row = QHBoxLayout()
         self.add_btn = QPushButton("Add &selected")
@@ -157,6 +197,8 @@ class DesignDialog(QDialog):
         self.add_btn.clicked.connect(self._add_selected)
         self.add_btn.setEnabled(False)
         self.add_best_btn = QPushButton("Add best of &each variant")
+        self.add_best_btn.setToolTip(
+            "For each distinct variant, add only the highest-scoring candidate.")
         self.add_best_btn.clicked.connect(self._add_best_each)
         self.add_best_btn.setEnabled(False)
         add_row.addWidget(self.add_btn)
@@ -243,19 +285,51 @@ class DesignDialog(QDialog):
         self.status.setText(msg)
         self.design_btn.setEnabled(not busy)
 
+
+    def _autofit_columns(self):
+        """Size columns to content, then keep the last section stretchy."""
+        hdr = self.table.horizontalHeader()
+        hdr.setStretchLastSection(False)
+        self.table.resizeColumnsToContents()
+        # Cap very wide columns so the table stays usable
+        caps = {0: 280, 3: 200, 7: 220}  # Variant, Shape, 3' dbSNP
+        for col, cap in caps.items():
+            if self.table.columnWidth(col) > cap:
+                self.table.setColumnWidth(col, cap)
+        # Floor minimums for numeric-ish columns
+        floors = {1: 52, 2: 72, 4: 64, 5: 72, 6: 52}
+        for col, floor in floors.items():
+            if self.table.columnWidth(col) < floor:
+                self.table.setColumnWidth(col, floor)
+        hdr.setStretchLastSection(True)
+        self.table.resizeRowsToContents()
+
     def _on_result(self, cands, errors):
-        self._cands = cands
+        self._cands = list(cands)
+        self.table.setSortingEnabled(False)
         self.table.setRowCount(len(cands))
         for row, c in enumerate(cands):
             from .. import design
             spec = {"rsid": c.rsid or None, "chrom": c.chrom, "pos": c.pos,
                     "ref": c.ref, "alt": c.alt}
-            vals = [design.spec_label(spec), str(c.score),
-                    f"{c.fragment_len} bp", c.shape,
-                    f"{c.delta_area:.1f}", f"{c.ft:.0f}/{c.rt:.0f}",
-                    c.clamp or "-", c.snps_3prime]
-            for col, v in enumerate(vals):
-                self.table.setItem(row, col, QTableWidgetItem(v))
+            label = design.spec_label(spec)
+            # Display text + UserRole sort keys (numeric / tuple)
+            cells = [
+                (label, (_chrom_sort_key(c.chrom), int(c.pos), label)),
+                (str(c.score), int(c.score)),
+                (f"{c.fragment_len} bp", int(c.fragment_len)),
+                (c.shape, (c.shape or "").lower()),
+                (f"{c.delta_area:.1f}", float(c.delta_area)),
+                (f"{c.ft:.0f}/{c.rt:.0f}", (float(c.ft) + float(c.rt)) / 2.0),
+                (c.clamp or "-", c.clamp or "-"),
+                (c.snps_3prime or "", c.snps_3prime or ""),
+            ]
+            for col, (text, key) in enumerate(cells):
+                item = SortableItem(text)
+                item.setData(Qt.UserRole, key)
+                # Stable link to candidate after header-sort reorders rows
+                item.setData(Qt.UserRole + 1, row)
+                self.table.setItem(row, col, item)
         msg = f"ranked {len(cands)} candidate(s)" if cands \
             else "no candidate span these variants"
         if errors:
@@ -264,6 +338,11 @@ class DesignDialog(QDialog):
         self.add_btn.setEnabled(bool(cands) and self.table.currentRow() >= 0)
         self.add_best_btn.setEnabled(bool(cands))
         self._thread = None
+        # Default: Score descending (matches engine ranking)
+        self.table.setSortingEnabled(True)
+        self.table.sortItems(1, Qt.DescendingOrder)
+        self._autofit_columns()
+
 
     def _on_error(self, message):
         self._set_busy(False, f'<font color="#a00">failed: {message}</font>')
@@ -278,9 +357,28 @@ class DesignDialog(QDialog):
     def _variant_key(self, c) -> str:
         return c.rsid or f"{c.chrom}:{c.pos} {c.ref}>{c.alt}"
 
+    def _candidate_at_row(self, row: int):
+        """Resolve candidate after the table may have been re-sorted."""
+        if row < 0 or row >= self.table.rowCount():
+            return None
+        item = self.table.item(row, 0)
+        if item is None:
+            return None
+        idx = item.data(Qt.UserRole + 1)
+        if idx is None:
+            idx = row
+        try:
+            idx = int(idx)
+        except (TypeError, ValueError):
+            return None
+        if 0 <= idx < len(self._cands):
+            return self._cands[idx]
+        return None
+
     def _add_row(self, row):
-        if 0 <= row < len(self._cands):
-            self.candidate.emit(self._cands[row])
+        c = self._candidate_at_row(row)
+        if c is not None:
+            self.candidate.emit(c)
 
     def _on_double_click(self, _index):
         self._add_row(self.table.currentRow())
@@ -288,7 +386,17 @@ class DesignDialog(QDialog):
     def _add_selected(self):
         rows = sorted({i.row()
                        for i in self.table.selectionModel().selectedRows()})
-        cands = [self._cands[r] for r in rows if 0 <= r < len(self._cands)]
+        cands = []
+        seen = set()
+        for r in rows:
+            c = self._candidate_at_row(r)
+            if c is None:
+                continue
+            key = id(c)
+            if key in seen:
+                continue
+            seen.add(key)
+            cands.append(c)
         if not cands:
             return
         if len(cands) == 1:
