@@ -208,7 +208,7 @@ def _custom_pair(seq: str, chrom: str, c: dict, var_pos: int,
         frag_prof = refmod.calc_tm_profile(
             (pr.GC_CLAMP + frag) if side == "5'" else (frag + pr.GC_CLAMP),
             Na=na)
-        dip = pr.fragment_dip(frag_prof, side, tol=1.5)
+        dip = pr.fragment_dip(frag_prof, side)
         if dip is not None and dip.get("has_dip") and side == "5'":
             dip["dip_pos"] = max(0, dip["dip_pos"] - len(pr.GC_CLAMP))
         shape = pr._shape_text(dip, ps)

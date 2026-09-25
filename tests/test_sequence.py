@@ -167,6 +167,21 @@ def test_delta_area_and_shape_keys():
     assert rv["delta_area"] > 0
 
 
+def test_shallow_dip_near_3p_clamp_is_flagged():
+    # the pasted 150 bp amplicon whose curve dips to ~70.35 C at base ~141
+    # and climbs back up into the 3' clamp: sub-degree, must still be a dip
+    wt = ("gactgcagagaaaggcagggctggttcataacaagctttgtgcgtcccaatatgacagct"
+          "gaagttttccaggggctgatggtgagccagtgagggtaagtacacagaacatcctagag"
+          "aaaccctcattccttaaagattaaaaataaa").upper()
+    r3 = cli.analyze_sequence(wt, clamp="3'")
+    assert r3["melting_shape"] == "dip @base 141 (0.5 C, 53 bp)", \
+        r3["melting_shape"]
+    r5 = cli.analyze_sequence(wt, clamp="5'")
+    assert r5["melting_shape"] == "flat/slope ok", r5["melting_shape"]
+    rn = cli.analyze_sequence(wt, clamp="none")
+    assert rn["melting_shape"] == "n/a", rn["melting_shape"]
+
+
 def _run_all():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]

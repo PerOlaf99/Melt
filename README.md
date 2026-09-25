@@ -66,7 +66,10 @@ opens a saved project on start.
 - Melting-shape flagging: a valley under the clamp gradient (dip) is
   detected per amplicon and flagged with a ⚠ in the list, the info panel,
   the table and the legend, so a panel that is unsuitable for CTCE reads
-  at a glance.
+  at a glance.  The scan runs on the *clamped* physical fragment (GC clamp
+  attached) with a 0.5 °C noise floor, so even shallow sub-degree troughs
+  — like the one that forms where the curve climbs back into a 3' clamp —
+  are reported.
 - Pasting works with the plain headers `>wt` / `>mut` (or `>ref` /
   `>alt`), no `_suffix_` base name required, and pairs like
   `name_wt`/`name_mut` as before.

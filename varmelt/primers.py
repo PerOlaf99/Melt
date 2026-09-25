@@ -288,9 +288,9 @@ def _attached_side(seq, ps, pe, na):
     frag = seq[ps:pe + 1]
     clamp_len = len(GC_CLAMP)
     d5 = fragment_dip(reference.calc_tm_profile(GC_CLAMP + frag, Na=na),
-                      "5'", tol=1.5)
+                      "5'")
     d3 = fragment_dip(reference.calc_tm_profile(frag + GC_CLAMP, Na=na),
-                      "3'", tol=1.5)
+                      "3'")
     for d in (d5, d3):
         if d is not None and d["has_dip"]:
             d["dip_pos"] = max(0, d["dip_pos"] - clamp_len) \
@@ -309,15 +309,17 @@ def _attached_side(seq, ps, pe, na):
     return side, (d5 if side == "5'" else d3)
 
 
-def fragment_dip(profile, clamp_side, tol=1.5):
+def fragment_dip(profile, clamp_side, tol=0.5):
     """Detect a melting-map 'dip' (valley) in an amplicon profile.
 
     Traversed from the GC-clamp end towards the other end, the local melting
     temperature must be continuously decreasing or flat; the anomaly to avoid
     is a region that falls below the surrounding level and then rises again
     (DNGE/CTCE: a valley under the gradient).  ``tol`` is the noise floor in
-    Celsius: tiny per-base jitter and gentle slopes are accepted, only a
-    genuine descent followed by a recovery is reported.
+    Celsius (default 0.5): the melting model's per-base jitter is only
+    ~0.01-0.1 C, so even shallow sub-degree valleys — such as the trough that
+    forms where the curve climbs back up into the 3' GC clamp — are genuine
+    and get reported.
 
     ``profile`` is the per-base ref Tm over the product (window coordinates),
     ``clamp_side`` the ``"5'"``/``"3'"`` end that carries the GC clamp (or
