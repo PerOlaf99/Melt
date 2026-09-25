@@ -1,0 +1,3 @@
+primer3-py>=2.0.0
+# optional, for reading local UCSC 2bit genomes instead of the REST API:
+# py2bit>=0.3.0

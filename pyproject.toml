@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "varmelt"
+version = "0.1.0"
+description = "Variant melting profile analysis: Primer3 primer design + Blossey-Carlon melting maps for hg19/hg38"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["primer3-py>=2.0.0"]
+
+[project.optional-dependencies]
+two-bit = ["py2bit>=0.3.0"]
+
+[tool.setuptools]
+packages = ["varmelt"]

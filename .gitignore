@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# app output (generated reports / profiles)
+webout/
+
+# editor / OS
+.DS_Store
+*.swp

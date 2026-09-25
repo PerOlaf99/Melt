@@ -1,0 +1,135 @@
+import sys
+sys.path.insert(0, '/home/per/variant-melting-profiles')
+
+from varmelt import cli
+from varmelt import primers as pr
+from varmelt import webapp
+
+
+def _dna(length, seed="ATGCTAG"):
+    out = []
+    while len(out) * len(seed) < length:
+        out.append(seed)
+    return (seed * length)[:length]
+
+
+def test_pasted_primers_convention():
+    seq = _dna(120)
+    r = cli.analyze_sequence(seq, clamp="none")
+    assert r["fp"] == seq[:20], r["fp"]  # forward = first 20 bases
+    assert r["rp"] == pr._revcomp(seq[-20:]), r["rp"]
+    # the reverse oligo anneals on the minus strand: rc(rp) == last 20 bases
+    assert pr._revcomp(r["rp"]) == seq[-20:]
+
+
+def test_clamp_sides():
+    seq = _dna(120)
+    for clamp in ("5'", "3'", "none"):
+        r = cli.analyze_sequence(seq, clamp=clamp)
+        it = r["pairs"][0]
+        assert it.clamp_position == (clamp if clamp != "none" else None)
+        assert r["clamp"] == (clamp if clamp != "none" else "none")
+        assert len(r["rows"]) == 1
+        # no second allele -> no separation, identical profiles
+        assert r["alt_prof"] is r["ref_prof"]
+        assert r["alt_mean_tm"] == r["ref_mean_tm"]
+    assert r["seq_mode"] is True
+
+
+def test_short_or_invalid_rejected():
+    try:
+        cli.analyze_sequence("ATGC")            # < 40 bp
+        raise AssertionError("short sequence accepted")
+    except ValueError:
+        pass
+    try:
+        cli._normalise_pasted_dna("ACGTNRY")
+        raise AssertionError("ambiguous bases accepted")
+    except ValueError:
+        pass
+
+
+def test_normalise_pasted():
+    # header, spaces, digits dropped; U mapped to T; case folded
+    assert cli._normalise_pasted_dna(">hdr\nacg u12T") == "ACGTT"
+    assert "U" not in cli._normalise_pasted_dna("aUc")
+
+
+def test_fasta_parse():
+    recs = webapp._parse_fasta(">one\nacgt\nacgt\n\n>two\ntttt")
+    assert [x["name"] for x in recs] == ["one", "two"]
+    assert recs[0]["seq"] == "acgtacgt"
+    # no header at all -> single record
+    one = webapp._parse_fasta("acgtacgt\nTTTT")
+    assert len(one) == 1 and one[0]["seq"] == "acgtacgtTTTT"
+
+
+def test_whole_string_is_amplicon():
+    seq = _dna(160)
+    r = cli.analyze_sequence(seq)
+    it = r["pairs"][0]
+    assert it.product_start == 0
+    assert it.product_end == len(seq) - 1
+    assert it.product_length == len(seq)
+    assert r["dnalen"] == len(seq)
+
+
+def test_pair_wt_mut():
+    wt = _dna(140)
+    while wt[76] == "A":                 # periodic seed: force a real swap
+        wt = _dna(140, seed="ACGTGATC")
+    mut = wt[:76] + "A" + wt[77:]        # one-base swap (wt[76] -> A)
+    r = cli.analyze_sequence_pair(wt, mut, clamp="3'")
+    assert r["paired"] is True
+    assert r["mut_idx"] == 76
+    assert r["refseq"] == wt and r["altseq"] == mut
+    assert r["ref_prof"] is not r["alt_prof"]
+    assert abs(r["delta"] - (r["alt_mean_tm"] - r["ref_mean_tm"])) < 1e-9
+    it = r["pairs"][0]
+    assert it.clamp_position == "3'"
+    # primers come from the wildtype flanks
+    assert r["fp"] == wt[:20]
+    assert r["rp"] == pr._revcomp(wt[-20:])
+
+
+def test_pair_indel_and_identical_rejected():
+    wt = _dna(140)
+    mut = wt[:80] + "GG" + wt[80:]         # insertion
+    r = cli.analyze_sequence_pair(wt, mut)
+    assert r["indel"] == len(wt) - len(mut) == -2
+    assert r["mut_idx"] == 80
+    try:
+        cli.analyze_sequence_pair(wt, wt)
+        raise AssertionError("identical wt/mut accepted")
+    except ValueError:
+        pass
+
+
+def test_pairing_grouping():
+    recs = [
+        {"name": "amp1_wt", "seq": "A" * 50},
+        {"name": "amp1_mut", "seq": "G" + "A" * 49},
+        {"name": "solo", "seq": "C" * 50},
+        {"name": "r2_ref", "seq": "T" * 50},
+        {"name": "r2_alt", "seq": "T" * 50},
+    ]
+    items = webapp._pair_sequences(recs)
+    kinds = [i["kind"] for i in items]
+    assert kinds == ["pair", "seq", "pair"], kinds
+    assert items[0]["name"] == "amp1"
+    assert items[0]["wt"] == "A" * 50 and items[0]["mut"] == "G" + "A" * 49
+    assert items[1]["name"] == "solo"
+    assert items[2]["name"] == "r2"
+
+
+def _run_all():
+    tests = [v for k, v in sorted(globals().items())
+             if k.startswith("test_") and callable(v)]
+    for t in tests:
+        t()
+        print("ok", t.__name__)
+    print("all tests passed")
+
+
+if __name__ == "__main__":
+    _run_all()
