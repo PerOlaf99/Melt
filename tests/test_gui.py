@@ -578,6 +578,39 @@ def test_example_menu_braf_v600e_and_toggle():
     ok(len(win.chart._datasets) == n, "re-ticking restores the chart")
 
 
+def test_example_menu_braf_silent_vs_v600e():
+    from varmelt.gui.examples import (_SILENT_SWAP_IDX, braf_silent_swap_items,
+                                      braf_v600e_items)
+    from PySide6.QtWidgets import QApplication
+    from varmelt.gui.main import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    silent = braf_silent_swap_items()[0]
+    v600e = braf_v600e_items()[0]
+    ok(len(silent.wt) == len(silent.mut) == 127, "silent pair is two strands")
+    ok(silent.mut[_SILENT_SWAP_IDX] == "A"
+       and silent.wt[_SILENT_SWAP_IDX] == "T",
+       "silent pair changes T>A exactly at base 28")
+    ok(v600e.mut[80] == "A" and v600e.wt[80] == "T",
+       "V600E is the same T>A transversion, at base 80")
+
+    win = MainWindow()
+    win._load_example_braf_v600e()
+    win._load_example_braf_silent()
+    app.processEvents()
+    ok(len(win.project.items) == 2, "both T>A pairs load together")
+    ev = win.project.items[0].result       # V600E visible
+    es = win.project.items[1].result       # silent (dTm ~ 0)
+    ok(ev and es and ev.get("paired") and es.get("paired"),
+       "both pairs compute")
+    ok(abs(es["delta"]) < 0.001 and es["delta_area"] < 1.0,
+       "the silent T>A barely shifts Tm (|dTm| < 0.001 C, delta-area < 1)")
+    ok(abs(ev["delta"]) > 0.01 and ev["delta_area"] > 5.0,
+       "the same T>A at V600E shifts the curve (delta-area > 5 C*bp)")
+    ok(es["delta_area"] < ev["delta_area"] / 10,
+       "the silent swap is an order of magnitude less visible than V600E")
+
+
 if __name__ == "__main__":
     test_model_compute_roundtrip()
     test_project_schema()

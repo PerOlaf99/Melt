@@ -214,6 +214,8 @@ class MainWindow(QMainWindow):
                          self._load_example_braf)
         self._add_action(m_exp, "BRAF V600E wt/mut pair",
                          self._load_example_braf_v600e)
+        self._add_action(m_exp, "BRAF silent T->A (dTm ~ 0)",
+                         self._load_example_braf_silent)
 
         m_help = self.menuBar().addMenu("&Help")
         self._add_action(m_help, "&About", self._about)
@@ -278,6 +280,15 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             "BRAF V600E: GTG -> GAG (c.1799T>A) on the 127 bp amplicon "
             "(flip the GC clamp to compare shapes)", 6000)
+
+    def _load_example_braf_silent(self):
+        """Add the BRAF silent T->A wt/mut pair (dTm ~ 0)."""
+        from .examples import braf_silent_swap_items
+        self._load_example(braf_silent_swap_items)
+        self.statusBar().showMessage(
+            "BRAF silent T->A at base 28: dTm ~ 0.0000 C, delta-area 0.1 "
+            "C*bp -- the same T->A as V600E, but here the curve does not "
+            "move at all", 6000)
 
     def _rename_item(self):
         it = self._current_item()

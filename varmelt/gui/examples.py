@@ -52,3 +52,32 @@ def braf_v600e_items():
         Item(kind="pair", name="BRAF V600E wt/mut pair", wt=wt, mut=mut,
              clamp="5'"),
     ]
+
+
+# Not every T->A changes the melt map: at base 28 the same transversion is
+# invisible.  A complement-preserving swap (T->A) keeps the GC content of a
+# G.C/T.A pair identical, and in some nearest-neighbour contexts the two
+# flanking dimer stacks cancel so the per-base profile (and the mean melting
+# temperature) barely move.  Measured on this amplicon: dTm ~ 0.0000 C and
+# a delta-area of 0.1 C*bp, against -0.0851 C/12.1 C*bp for the V600E T->A
+# at base 80.  So the same base change is visible or invisible depending on
+# where on the fragment it lands -- a mutation can simply be missed by Tm.
+_SILENT_SWAP_IDX = 28
+_SILENT_CONTEXT = "GATATATTTCTTCA"          # flanking bases of the swap
+
+
+def braf_silent_swap_items():
+    """A wt/mut Item showing a T->A transversion that leaves melting
+    temperature (and the whole profile) essentially unchanged.
+
+    Loaded next to the V600E pair it contrasts the same T->A at two
+    contexts: base 80 shifts the curve, base 28 does not (delta-area 0.1).
+    """
+    from .model import Item
+    wt = BRAF_FLAT_VS_SLOPED
+    i = _SILENT_SWAP_IDX
+    mut = wt[:i] + "A" + wt[i + 1:]
+    return [
+        Item(kind="pair", name="BRAF silent T->A (dTm ~ 0)", wt=wt,
+             mut=mut, clamp="5'"),
+    ]
