@@ -20,15 +20,6 @@ MUT = SEQ[:40] + "T" + SEQ[41:]         # A -> T at base 40/41
 failures = 0
 
 
-def stack_widgets(win):
-    out = []
-    for i in range(win.stack.count()):
-        w = win.stack.itemAt(i).widget()
-        if w is not None:
-            out.append(w)
-    return out
-
-
 def ok(cond, msg):
     global failures
     if cond:
@@ -97,79 +88,70 @@ def test_chart_renders_png():
     win._refresh_list()
     win._render_plots()
 
-    def charts():
-        from varmelt.gui.plot import MeltChart as _MC
-        return [w for w in stack_widgets(win) if isinstance(w, _MC)]
+    ch = win.chart
+    ok(len(ch._datasets) == 2, "one overlay contains both ticked items")
+    ok(ch._datasets[0]["color"] != ch._datasets[1]["color"],
+       "each item gets its own line colour")
+    ok(ch.max_amp_span() == len(SEQ), "amplicon frame spans both fragments")
+    ok(win._csv_row(win.project.items[1])
+       and win._csv_row(win.project.items[1])[0] == "frag_pair",
+       "csv row for pair")
+    row = win._csv_row(win.project.items[1])
+    ok(row[6] == 0 and row[7] == 79 and row[8] == 80,
+       "product start/end/length in csv row")
 
-    win_checks = [(i.plot, i.result is not None and not i.error)
-                  for i in win.project.items]
-    ok(win_checks[0][0], "seq item is ticked to plot")
-    ok(all(plot and ok_ for plot, ok_ in win_checks),
-       "both items ticked + computed after selection")
-    ok(len(charts()) == 2, "two chart panels plotted at the same time")
+    # different clamp sides still share the amplicon frame: the 5' clamp
+    # sticks out to the left (x < 0), the 3' clamp to the right (x >= 80)
+    d5 = ch._datasets[0]
+    d3 = ch._datasets[1]
+    ok(MeltChart.substrate_x(d5, len(GC_CLAMP)) == 0,
+       "5' clamp: amplicon base 1 sits at x=0")
+    ok(MeltChart.substrate_x(d5, len(GC_CLAMP) + 40) == 40,
+       "5' clamp: inner bases align to x = amplicon offset")
+    ok(MeltChart.substrate_x(d3, 0) == 0,
+       "3' clamp: amplicon base 1 still at x=0 (aligned)")
+    ok(ch._data_x0 == -len(GC_CLAMP), "5' clamp tail extends left of frame")
+    ok(ch._data_x1 == len(SEQ) + len(GC_CLAMP),
+       "3' clamp tail extends right of frame")
 
-    it = win.project.items[0]
-    fd = it.fragment_profiles(win.project.na)
-    ch = MeltChart()
-    ch.set_map(**fd, mark_label="mutation")
-    ok(len(ch._ref) == len(SEQ) + len(GC_CLAMP),
-       "chart shows 5' clamp bases in the curve")
-    ok(len(ch._alt) == 0, "seq mode: no alt curve")
-    pm = ch.grab()
-    ok(not pm.isNull(), "chart paints to pixmap")
-    ok(not ch._delta_drawn, "seq chart draws no delta band")
-    with tempfile.TemporaryDirectory() as td:
-        path = os.path.join(td, "chart.png")
-        ok(pm.save(path, "PNG") and os.path.getsize(path) > 0,
-           "chart PNG written")
-
-    it = win.project.items[1]
-    ok(not it.error, "pair item computes")
-    fd = it.fragment_profiles(win.project.na)
-    ch2 = MeltChart()
-    ch2.set_map(**fd, mark_label="mutation")
-    ok(len(ch2._ref) == len(SEQ) + len(GC_CLAMP),
-       "pair: 3' clamp extends ref curve")
-    ok(len(ch2._alt) == len(MUT) + len(GC_CLAMP),
-       "pair mode: alt curve with clamp present")
-    ok(ch2._mark_idx == 40, "mutation mark preserved after clamp")
-    ok(ch2._paired is True, "paired flag on chart")
-    ch2.grab()
-    ok(ch2._delta_drawn, "pair chart fills the wt-mutant delta area")
-
-    # GC clamp is not a primer: with a left (5') clamp the forward primer
-    # starts at base len(GC_CLAMP) (0-based) == base 43 (1-based)
-    fd0 = win.project.items[0].fragment_profiles(win.project.na)
-    ch0 = MeltChart()
-    ch0.set_map(**fd0)
-    fp_l, rp_l = ch0.primer_regions()
-    ok(fp_l[0] == len(GC_CLAMP), "left clamp: FP starts after the clamp")
-    ok(fp_l[0] + 1 == len(GC_CLAMP) + 1,
-       "left clamp: FP is first primer base (1-based)")
-    ok(fp_l[1] == len(GC_CLAMP) + 20, "FP spans 20 bases")
-    ok(rp_l[1] == len(GC_CLAMP) + len(SEQ), "left clamp: RP ends at amplicon end")
-    fp_r, rp_r = ch2.primer_regions()
-    ok(fp_r[0] == 0, "right clamp: FP starts at base 1")
-    ok(rp_r[0] == len(SEQ) - 20 and rp_r[1] == len(SEQ),
-       "right clamp: RP before the clamp tail")
-    ok(ch0.primer_regions()[0][0] + 1 == 43, "primer starts at base 43")
-
-    # reported primer sequences are the 20-mers, clamp not included
+    # GC clamp is not a primer: reported primers are the bare 20-mers
     from varmelt.primers import _revcomp
     ok(win.project.items[0].result["fp"] == SEQ[:20],
        "FP sequence is the bare 20-mer")
     ok(win.project.items[0].result["rp"] == _revcomp(SEQ[-20:]),
        "RP sequence is the bare 20-mer")
 
-    # toggle off the pair -> only one panel remains
+    pm = ch.grab()
+    ok(not pm.isNull(), "overlay plot paints to pixmap")
+    ok(ch._delta_count == 1, "only the pair fills a delta area")
+    ok(ch._legend_lines == 3, "legend lists seq, pair and its mutant line")
+    with tempfile.TemporaryDirectory() as td:
+        path = os.path.join(td, "chart.png")
+        ok(pm.save(path, "PNG") and os.path.getsize(path) > 0,
+           "chart PNG written")
+
+    # zoom in/out works and reset restores the full view
+    x0, x1 = ch._view_x0, ch._view_x1
+    span0 = x1 - x0
+    ch.zoom_in()
+    ok(ch._view_x1 - ch._view_x0 < span0, "zoom in narrows the x view")
+    ch.zoom_out()
+    ok(ch._view_x1 - ch._view_x0 > 0.9 * span0,
+       "zoom out widens back towards the data span")
+    ch.reset()
+    ok(ch._view_x0 == ch._data_x0 and ch._view_x1 == ch._data_x1,
+       "reset returns to the full data span")
+
+    # untick the pair -> a single dataset remains
     win.project.items[1].plot = False
     win._render_plots()
-    ok(len(charts()) == 1, "untick removes the panel from the stack")
+    ok(len(ch._datasets) == 1, "unticking removes the graph from the overlay")
+    win.project.items[0].plot = False
+    win._render_plots()
+    ok(len(ch._datasets) == 0
+       and "tick an amplicon" in ch._status,
+       "nothing ticked -> placeholder message")
 
-    row = win._csv_row(win.project.items[1])
-    ok(row is not None and row[0] == "frag_pair", "csv row for pair")
-    ok(row[6] == 0 and row[7] == 79 and row[8] == 80,
-       "product start/end/length in csv row")
     win._refresh_list()
     ok(win.list.count() == 2, "two rows in amplikon list")
 

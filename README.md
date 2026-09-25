@@ -56,15 +56,22 @@ pairs — and get the per-base melting map and the primer set (first/last 20
 bases, optional GC clamp) immediately.  `python -m varmelt.gui project.json`
 opens a saved project on start.
 
-- One chart per ticked amplicon — tick any rows in the list and several
-  melt maps are plotted at the same time (each: black wildtype map, mutant
-  overlaid dashed red, the GC-clamp oligo shaded grey at the end it occupies,
-  the mutation base marked, and the pink area between the wt and mutant
-  curves showing the melt separation, with the ΔTm in the panel header).
-- The GC clamp is drawn as a grey tail and is *not* part of the primer:
-  a base ruler above the map and FP/RP markers show the forward primer
-  starting after the clamp (base 43 for a 42-base left clamp), and the
-  reported primer sequences are the bare 20-mers.
+- One overlaid plot for every ticked amplicon, each in its own colour
+  (wildtype solid, mutant dashed) with a legend, so several melt maps can
+  be compared side by side under the same conditions (CTCE).  The
+  melt-separation area between the wt and mutant curves of each pair is
+  filled in that item's colour.
+- Fragments are aligned on their amplicon frame, so the GC clamp never
+  shifts the amplicon: the clamp is drawn as a grey tail *outside* the
+  frame (base-ruler at the bottom labels your amplicon base positions) —
+  two fragments with clamps on different sides stay comparable because
+  Base 1 of each amplicon is always Base 1 on the plot.
+- The GC clamp is *not* part of the primer: the reported primer sequences
+  are the bare 20-mers (with a 42-base left clamp the forward primer
+  starts at amplicon base 43) and no primer or mutation markers clutter
+  the lines.
+- Zoom & pan the plot: mouse wheel or the +/− buttons zoom in/out, drag
+  pans, double-click (or *Reset*) shows everything again.
 - Live adjustment: change the salt (Na+) or the selected amplicon's GC
   clamp and the map, Tm and primer set re-plot right away.
 - The **primer table** under the chart is editable in place and has a

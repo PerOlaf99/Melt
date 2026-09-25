@@ -1,5 +1,4 @@
 """Main window of the standalone varmelt GUI (WinMelt-style workbench)."""
-import html
 import os
 import sys
 
@@ -9,14 +8,14 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox,
                                QDoubleSpinBox, QFileDialog, QHeaderView,
                                QHBoxLayout, QInputDialog, QLabel, QListWidget,
                                QListWidgetItem, QMainWindow, QMenu,
-                               QMessageBox, QPushButton, QScrollArea,
-                               QSizePolicy, QSplitter, QTableWidget,
-                               QTableWidgetItem, QVBoxLayout, QWidget)
+                               QMessageBox, QPushButton, QSizePolicy,
+                               QSplitter, QTableWidget, QTableWidgetItem,
+                               QVBoxLayout, QWidget)
 
 from .. import cli
 from .dialogs import AddPairDialog, AddSequenceDialog, EditItemDialog
 from .model import CLAMP_SIDES, Item, Project
-from .plot import MeltChart
+from .plot import MeltChart, PALETTE
 
 _SUPPORTED = [("varmelt project (*.varmelt.json)", "*.varmelt.json"),
               ("JSON files (*.json)", "*.json")]
@@ -138,17 +137,27 @@ class MainWindow(QMainWindow):
         self.info.setWordWrap(True)
         rlay.addWidget(self.info)
 
-        from PySide6.QtWidgets import QScrollArea
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        self._plotcanvas = QWidget()
-        self.stack = QVBoxLayout(self._plotcanvas)
-        self.stack.setContentsMargins(0, 0, 0, 0)
-        self.stack.setSpacing(6)
-        self._plotcanvas.stack = self.stack
-        scroll.setWidget(self._plotcanvas)
-        self._scroll = scroll
-        rlay.addWidget(scroll, stretch=1)
+        # single overlay plot with zoom controls
+        self.chart = MeltChart()
+        tools = QHBoxLayout()
+        tools.addWidget(QLabel("<b>Melt maps</b> (overlaid)"))
+        tools.addStretch(1)
+        b_minus = QPushButton("−")
+        b_minus.setToolTip("zoom out (also mouse wheel)")
+        b_minus.setFixedWidth(34)
+        b_minus.clicked.connect(self.chart.zoom_out)
+        b_plus = QPushButton("+")
+        b_plus.setToolTip("zoom in (also mouse wheel)")
+        b_plus.setFixedWidth(34)
+        b_plus.clicked.connect(self.chart.zoom_in)
+        b_reset = QPushButton("Reset")
+        b_reset.setToolTip("show all melt maps again")
+        b_reset.clicked.connect(self.chart.reset)
+        tools.addWidget(b_minus)
+        tools.addWidget(b_plus)
+        tools.addWidget(b_reset)
+        rlay.addLayout(tools)
+        rlay.addWidget(self.chart, stretch=1)
 
         # primer-set report table (editable; copy / save it below)
         header = QHBoxLayout()
@@ -358,54 +367,32 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("new project")
 
     def _render_plots(self):
-        """Rebuild the chart stack: one panel per ticked item."""
-        while self.stack.count():
-            item_w = self.stack.takeAt(0)
-            w = item_w.widget()
-            if w is not None:
-                self.stack.removeWidget(w)
-                w.deleteLater()
+        """Rebuild the single overlay plot from every ticked item."""
         shown = [it for it in self.project.items if it.plot and it.result
                  and not it.error]
         if not shown:
-            empty = QLabel("tick an amplicon in the list to plot its melt "
-                           "map")
-            empty.setAlignment(Qt.AlignCenter)
-            empty.setStyleSheet("color:#999")
-            self.stack.addWidget(empty)
-            self.stack.addStretch(1)
+            self.chart._status = ("tick an amplicon in the list to plot "
+                                  "its melt map")
+            self.chart.set_datasets([])
             return
-        import math
+        datasets = []
         for idx, it in enumerate(shown):
             fd = it.fragment_profiles(self.project.na)
             if fd is None:
                 continue
-            ref_prof = fd["ref_prof"]
-            alt_prof = fd["alt_prof"]
-
-            def _mean(vals):
-                vals = [v for v in vals if not math.isnan(v)]
-                return sum(vals) / len(vals) if vals else float("nan")
-
-            mean = _mean(ref_prof)
-            kind = "wt/mut" if fd["paired"] else "sequence"
-            clamp = {None: "no clamp", "5'": "5' clamp",
-                     "3'": "3' clamp"}.get(fd["clamp_side"], "no clamp")
-            delta = ""
-            if fd["paired"] and alt_prof is not None:
-                d = _mean(alt_prof) - mean
-                delta = f" · &Delta;Tm {d:+.2f} °C"
-            head = QLabel(
-                f"<b>{html.escape(it.name)}</b>"
-                f"&nbsp;&nbsp;<span style='color:#777'>{kind} · "
-                f"{len(ref_prof)} bp · mean Tm {mean:.2f} °C · "
-                f"{clamp}{delta}</span>")
-            self.stack.addWidget(head)
-            chart = MeltChart()
-            chart.set_map(**fd, mark_label="mutation")
-            self.stack.addWidget(chart)
-        self.stack.addStretch(1)
-        self._scroll.verticalScrollBar().setValue(0)
+            color = PALETTE[idx % len(PALETTE)]
+            datasets.append({
+                "name": it.name,
+                "paired": bool(fd["paired"]),
+                "ref_prof": fd["ref_prof"],
+                "alt_prof": fd["alt_prof"],
+                "clamp_len": fd["clamp_len"],
+                "clamp_side": fd["clamp_side"],
+                "mark_idx": fd["mark_idx"],
+                "indel": fd["indel"],
+                "color": color,
+            })
+        self.chart.set_datasets(datasets)
 
     # ----------------------------------------------------------- file io - #
     def _selected_file(self, save: bool):
@@ -477,7 +464,7 @@ class MainWindow(QMainWindow):
             return
         if not p.endswith(".png"):
             p += ".png"
-        if self._plotcanvas.grab().save(p, "PNG"):
+        if self.chart.grab().save(p, "PNG"):
             self.statusBar().showMessage(f"charts saved to {p}", 3000)
 
     def _export_csv(self):

@@ -1,18 +1,35 @@
 """QPainter-based melting-profile chart for the varmelt GUI.
 
-Draws the per-base local melting temperature (WinMelt-style) as polylines:
-black = wildtype/reference, dashed red = mutant/variant.  Also shades the
-GC-clamp oligo on the end it occupies and marks the mutation base.
+One canvas overlays the per-base melting maps of all ticked amplicons so
+they can be compared under the same conditions (CTCE).  Every amplicon is
+laid out on a *shared amplicon frame*: amplicon base ``j`` always maps to
+``x == j``, and the GC-clamp oligo is drawn as a grey tail *outside* that
+frame (to the left for a ``5'`` clamp, to the right for a ``3'`` clamp).
+That keeps fragments with clamps on different sides comparable instead of
+shifting one amplicon relative to the other.
+
+Each item gets its own colour (wildtype solid, mutant dashed) and a legend
+shows which line belongs to which amplicon.  There are no primer or
+mutation markers.  The view can be zoomed with the wheel or the +/- /
+Reset actions and panned by dragging (double click resets).
 """
 import math
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
+PALETTE = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e",
+           "#17becf", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22"]
+
+
+def amp_start(clamp_side, clamp_len):
+    """Substrate index of the first amplicon base for a clamped fragment."""
+    return (int(clamp_len) if clamp_side == "5'" else 0)
+
 
 class MeltChart(QWidget):
-    """Chart widget; call :meth:`set_map` to (re)plot an item's map."""
+    """Chart widget; call :meth:`set_datasets` to (re)plot the overlay."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -22,176 +39,205 @@ class MeltChart(QWidget):
         pal = self.palette()
         pal.setColor(self.backgroundRole(), QColor("white"))
         self.setPalette(pal)
-        self._seq = ""
-        self._ref = []
-        self._alt = []
-        self._clamp_len = 0
-        self._clamp_side = None
-        self._mark_idx = None
-        self._mark_label = "mutation"
-        self._indel = 0
-        self._xmin, self._xmax = 30.0, 98.0
-        self._paired = False
-        self._status = "no data"
-        self._delta_drawn = False
+        self._datasets = []
+        self._status = "tick an amplicon in the list to plot its melt map"
+        self._data_x0, self._data_x1 = 0.0, 1.0
+        self._data_y0, self._data_y1 = 40.0, 100.0
+        self._view_x0, self._view_x1 = 0.0, 1.0
+        self._view_y0, self._view_y1 = 40.0, 100.0
+        self._legend_lines = 0
+        self._delta_count = 0
+        self._drag = None
+        self._pad_l, self._pad_r = 52, 18
+        self._pad_t, self._pad_b = 14, 30
+
+    # --------------------------------------------------------- data input - #
+    def set_datasets(self, datasets):
+        """Plot a list of datasets; see ``_compute_bounds`` for the fields."""
+        self._datasets = list(datasets or [])
+        self._compute_bounds()
+        self.fit()
+        self.update()
 
     def clear(self, status="no data"):
-        self._seq = ""
-        self._ref = []
-        self._alt = []
-        self._clamp_len = 0
-        self._clamp_side = None
-        self._mark_idx = None
-        self._paired = False
+        self._datasets = []
         self._status = status
         self.update()
 
-    def set_map(self, ref_prof, alt_prof=None, seq="", clamp_len=0,
-                clamp_side=None, mark_idx=None, mark_label="mutation",
-                indel=0, paired=False):
-        self._ref = list(ref_prof) if ref_prof is not None else []
-        self._alt = (list(alt_prof)
-                     if alt_prof is not None
-                     and list(alt_prof) != list(ref_prof) else [])
-        self._seq = seq
-        self._clamp_len = max(0, int(clamp_len))
-        self._clamp_side = clamp_side
-        self._mark_idx = mark_idx
-        self._mark_label = mark_label
-        self._indel = int(indel)
-        self._paired = bool(paired)
-        self._status = "ready"
-        self._delta_drawn = False
+    def _compute_bounds(self):
+        xs, ys = [], []
+        for d in self._datasets:
+            ref = d.get("ref_prof") or []
+            cl = max(0, int(d.get("clamp_len", 0)))
+            side = d.get("clamp_side")
+            amp = max(len(ref) - cl, 1)
+            xs.append(((-cl if side == "5'" else 0),
+                       amp + (cl if side == "3'" else 0)))
+            for t in list(ref) + list(d.get("alt_prof") or []):
+                if t is not None and not math.isnan(t):
+                    ys.append(float(t))
+        self._data_x0 = min((a for a, _ in xs), default=0.0)
+        self._data_x1 = max((b for _, b in xs), default=100.0)
+        if self._data_x1 - self._data_x0 < 1:
+            self._data_x1 = self._data_x0 + 1
+        y0 = min(ys, default=50.0)
+        y1 = max(ys, default=90.0)
+        pad = (y1 - y0) * 0.08 or 2.0
+        self._data_y0, self._data_y1 = y0 - pad, y1 + pad
+        self._view_y0, self._view_y1 = self._data_y0, self._data_y1
+
+    @staticmethod
+    def substrate_x(d, i):
+        """x position of substrate base *i* (amplicon frame, see module doc)."""
+        return float(i) - amp_start(d.get("clamp_side"),
+                                    d.get("clamp_len", 0))
+
+    def max_amp_span(self):
+        span = 0
+        for d in self._datasets:
+            ref = d.get("ref_prof") or []
+            span = max(span, max(len(ref)
+                                 - max(0, int(d.get("clamp_len", 0))), 0))
+        return span
+
+    # --------------------------------------------------------- zoom / pan - #
+    def fit(self):
+        self._view_x0, self._view_x1 = self._data_x0, self._data_x1
         self.update()
 
-    # -- geometry / helpers ----------------------------------------------- #
-    def _xf(self, g, pad_l, plot_w, n):
-        return pad_l + g * plot_w / max(n - 1, 1)
+    def reset(self):
+        self.fit()
 
-    def _yf(self, t, pad_t, plot_h):
-        return pad_t + (1.0 - (max(float(t), self._xmin) - self._xmin)
-                        / (self._xmax - self._xmin)) * plot_h
+    def zoom_in(self):
+        self._zoom_at(0.5, 1.5)
 
-    def _amp(self):
-        """0-based fragment coordinates: the GC-clamp oligo is *not* part of
-        the primer, so the primers live inside the amplicon which sits after
-        the clamp on the 5' side and before it on the 3' side."""
-        n = len(self._ref)
-        cl = min(self._clamp_len, n) if self._clamp_side in ("5'", "3'") \
-            else 0
-        amp = n - cl
-        offset = cl if self._clamp_side == "5'" else 0
-        return offset, amp, n
+    def zoom_out(self):
+        self._zoom_at(0.5, 1.0 / 1.5)
 
-    def primer_regions(self):
-        """((fp0, fp1), (rp0, rp1)): half-open primer base intervals in
-        fragment coordinates.  With a left GC clamp the forward primer
-        starts at base ``len(GC_CLAMP)`` (0-based), i.e. base 43 1-based."""
-        offset, amp, n = self._amp()
-        return ((offset, min(offset + 20, n)),
-                (max(offset + amp - 20, 0), offset + amp))
+    def _zoom_at(self, frac, mag):
+        """Divide the visible x-span by *mag* around cursor fraction *frac*."""
+        x0, x1 = self._view_x0, self._view_x1
+        span = (x1 - x0) / mag
+        if span < 2.0 or span > 5.0 * (self._data_x1 - self._data_x0):
+            return
+        cx = x0 + (x1 - x0) * frac
+        self._view_x0 = cx - span * frac
+        self._view_x1 = self._view_x0 + span
+        self.update()
 
-    def _draw_path(self, qp, prof, g, n, pad_l, pad_t, plot_w, plot_h, width):
-        pen = qp.pen()
+    # -- geometry ---------------------------------------------------------- #
+    def _x(self, v, plot_w):
+        span = self._view_x1 - self._view_x0
+        return self._pad_l + (v - self._view_x0) / span * plot_w
+
+    def _y(self, t, plot_h):
+        span = self._view_y1 - self._view_y0
+        return self._pad_t + (1.0 - (t - self._view_y0) / span) * plot_h
+
+    # -- drawing helpers --------------------------------------------------- #
+    def _draw_polyline(self, qp, points, color, width, dash=False):
+        pen = QPen(QColor(color))
         pen.setWidthF(width)
+        if dash:
+            pen.setStyle(Qt.DashLine)
         qp.setPen(pen)
         seg = []
-        for i, t in prof:
-            if math.isnan(t):
+        for x, y in points:
+            if y is None or math.isnan(y):
                 if len(seg) >= 2:
                     qp.drawPolyline(QPolygonF(seg))
                 seg = []
                 continue
-            seg.append(QPointF(self._xf(g(i), pad_l, plot_w, n),
-                               self._yf(t, pad_t, plot_h)))
+            seg.append(QPointF(x, y))
         if len(seg) >= 2:
             qp.drawPolyline(QPolygonF(seg))
 
-    def _draw_delta_band(self, qp, n, pad_l, pad_t, plot_w, plot_h):
-        """Translucent area between the wt and mutant curves (aligned at the
-        mutation, leaving a gap for an indel) -- the visual melt separation
-        for a wt/mut pair.  Sets :attr:`_delta_drawn` when a band was
-        actually rendered."""
-        if not self._alt or not self._paired:
+    def _draw_delta_band(self, qp, d, plot_w, plot_h):
+        """Fill between the ref and alt curve of one pair, in its colour."""
+        ref = d.get("ref_prof") or []
+        alt = d.get("alt_prof")
+        if not ref or not alt or not d.get("paired"):
             return
-        n_alt = len(self._alt)
-        var = self._mark_idx if self._mark_idx is not None else 0
+        var = d.get("mark_idx")
+        var = 0 if var is None else int(var)
+        indel = int(d.get("indel", 0))
+        n_alt = len(alt)
+        top, bot = [], []
 
-        def g_alt(j):
-            return j if j < var else j + self._indel
-
-        def flush(top, bot):
+        def flush():
             if len(top) >= 2 and len(bot) >= 2:
+                col = QColor(d["color"])
+                col.setAlpha(60)
                 qp.setPen(Qt.NoPen)
-                qp.setBrush(QColor(255, 195, 195, 150))
+                qp.setBrush(col)
                 qp.drawPolygon(QPolygonF(
                     [QPointF(x, y) for x, y in top]
                     + [QPointF(x, y) for x, y in reversed(bot)]))
-                self._delta_drawn = True
+                self._delta_count += 1
 
-        top, bot = [], []
-        for i in range(n):
-            rt = self._ref[i]
-            j = i if i < var else i - self._indel
-            if math.isnan(rt) or not (0 <= j < n_alt) \
-                    or math.isnan(self._alt[j]):
-                flush(top, bot)
+        for i, rt in enumerate(ref):
+            j = i if i < var else i - indel
+            if rt is None or math.isnan(rt) \
+                    or not (0 <= j < n_alt) or alt[j] is None \
+                    or math.isnan(alt[j]):
+                flush()
                 top, bot = [], []
                 continue
-            x = self._xf(i, pad_l, plot_w, n)
-            yr = self._yf(rt, pad_t, plot_h)
-            ya = self._yf(self._alt[j], pad_t, plot_h)
+            x = self._x(self.substrate_x(d, i), plot_w)
+            yr = self._y(rt, plot_h)
+            ya = self._y(alt[j], plot_h)
             if yr <= ya:
                 top.append((x, yr))
                 bot.append((x, ya))
             else:
                 top.append((x, ya))
                 bot.append((x, yr))
-        flush(top, bot)
+        flush()
 
-    def _draw_ruler(self, qp, n, pad_l, pad_r, plot_w):
-        """Base numbers above the map; primer starts get a marked caret."""
-        y0, y1 = 14, 20
-        qp.setFont(QFont("Helvetica", 7))
-        every = 20
-        for b in range(0, n, every):
-            x = self._xf(b, pad_l, plot_w, n)
-            qp.setPen(QColor("#bbb"))
-            qp.drawLine(int(x), y0, int(x), y1)
-            qp.setPen(QColor("#888"))
-            if n > 120 and b % (every * 2) and b != 0:
-                continue                        # fewer labels when crowded
-            qp.drawText(int(x - 16), y1 + 1, 32, 10, Qt.AlignHCenter,
-                        str(b + 1))
-        fp_reg, rp_reg = self.primer_regions()
-        for x0, x1 in (fp_reg, rp_reg):
-            if x1 <= x0:
-                continue
-            x = self._xf(x0, pad_l, plot_w, n)
-            qp.setPen(QColor("#3a6fa8"))
-            qp.drawLine(int(x), y0, int(x), y0 + 5)
-        qp.setPen(QColor("#bbb"))
-        qp.drawLine(pad_l, y1 + 1, pad_l + plot_w, y1 + 1)
-
-    def _draw_primer_marks(self, qp, n, pad_l, pad_r, pad_t, plot_w, plot_h):
-        """Outline the primer regions (excluding the GC clamp) and label them
-        FP / RP so the primers are not confused with the plain clamp."""
-        fp_reg, rp_reg = self.primer_regions()
-        pen = QPen(QColor("#3a6fa8"))
-        pen.setWidthF(1.1)
-        for label, (a, b) in (("FP", fp_reg), ("RP", rp_reg)):
-            if b <= a:
-                continue
-            xa = self._xf(a, pad_l, plot_w, n)
-            xb = self._xf(max(b - 1, a), pad_l, plot_w, n) + 1
+    def _draw_legend(self, qp, plot_w, plot_h):
+        entries = []
+        for d in self._datasets:
+            entries.append((d["color"], True, d["name"], None))
+            if d.get("paired") and d.get("alt_prof"):
+                entries.append((d["color"], False, "mutant", d["name"]))
+        if not entries:
+            self._legend_lines = 0
+            return
+        qp.setFont(QFont("Helvetica", 8))
+        fm = qp.fontMetrics()
+        row_h = fm.height() + 4
+        padx, pady = 10, 8
+        x0 = self._pad_l + plot_w - padx
+        y = pady
+        # measure the widest entry text
+        wmax = 0
+        for _c, _sol, text, _d in entries:
+            wmax = max(wmax, fm.horizontalAdvance(text or ""))
+        bw = padx * 2 + 18 + wmax
+        bh = pady * 2 + row_h * len(entries)
+        box = QRectF(x0 - bw, y, bw, bh)
+        qp.setBrush(QColor(255, 255, 255, 215))
+        qp.setPen(QPen(QColor("#ccc")))
+        qp.drawRect(box)
+        y += pady + fm.ascent() - 1
+        sw = 12
+        for color, solid, text, _d in entries:
+            sx = x0 - bw + padx
+            qp.setPen(Qt.NoPen)
+            qp.setBrush(Qt.NoBrush)
+            pen = QPen(QColor(color))
+            pen.setWidthF(1.6)
+            if not solid:
+                pen.setStyle(Qt.DashLine)
             qp.setPen(pen)
-            qp.drawLine(int(xa), int(pad_t + 2), int(xb), int(pad_t + 2))
-            qp.drawLine(int(xa), int(pad_t + plot_h - 2),
-                        int(xb), int(pad_t + plot_h - 2))
-            qp.setPen(QColor("#3a6fa8"))
-            qp.setFont(QFont("Helvetica", 7, QFont.Bold))
-            qp.drawText(int(xa + 4), int(pad_t + 3), 26, 10,
-                        Qt.AlignLeft, label)
+            qp.drawLine(int(sx), int(y - fm.ascent() / 2),
+                        int(sx + sw), int(y - fm.ascent() / 2))
+            qp.setPen(QColor("#333"))
+            qp.drawText(int(sx + sw + 5), int(y - fm.ascent()),
+                        fm.horizontalAdvance(text) + 4, fm.height(),
+                        Qt.AlignLeft | Qt.AlignVCenter, text)
+            y += row_h
+        self._legend_lines = len(entries)
 
     # -- painting --------------------------------------------------------- #
     def paintEvent(self, event):                        # noqa: N802
@@ -199,92 +245,141 @@ class MeltChart(QWidget):
         qp.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
         qp.fillRect(0, 0, w, h, QColor("white"))
-        pad_l, pad_r, pad_t, pad_b = 46, 12, 30, 26
+        pad_l, pad_r, pad_t, pad_b = (self._pad_l, self._pad_r,
+                                      self._pad_t, self._pad_b)
         plot_w, plot_h = w - pad_l - pad_r, h - pad_t - pad_b
 
-        if not self._ref:
+        if not self._datasets:
             qp.setPen(QColor("#999"))
             qp.drawText(self.rect(), Qt.AlignCenter, self._status or "no data")
             return
 
-        n = len(self._ref)
+        self._legend_lines = 0
+        self._delta_count = 0
+        span_x = self.max_amp_span()
 
-        # base-number ruler + primer region markers
-        self._draw_ruler(qp, n, pad_l, pad_r, plot_w)
-
-        # grid + y labels
-        qp.setFont(QFont("Helvetica", 8))
-        for t in range(40, 96, 5):
-            y = self._yf(t, pad_t, plot_h)
-            qp.setPen(QColor("#ddd"))
-            qp.drawLine(int(pad_l), int(y), int(w - pad_r), int(y))
-            qp.setPen(QColor("#777"))
-            qp.drawText(int(pad_l - 42), int(y - 7), 38, 14,
-                        Qt.AlignRight | Qt.AlignVCenter, f"{t} °C")
-
-        # clamp oligo shade on the end it actually occupies
-        if self._clamp_len and self._clamp_len > 0:
-            cl = min(self._clamp_len, n)
-            x0 = pad_l
-            x1 = pad_l + plot_w
-            if self._clamp_side == "3'":
-                x0 = pad_l + (n - cl) * plot_w / max(n - 1, 1)
-                x1 = pad_l + plot_w
-            else:
-                x1 = pad_l + cl * plot_w / max(n - 1, 1)
+        # shared amplicon frame: a very light band behind everything
+        if span_x > 0:
             qp.setPen(Qt.NoPen)
-            qp.setBrush(QColor("#f0eded"))
+            qp.setBrush(QColor("#f7fafd"))
+            x0 = self._x(0, plot_w)
+            x1 = self._x(span_x, plot_w)
             qp.drawRect(int(x0), int(pad_t), int(max(x1 - x0, 2)),
                         int(plot_h))
-            qp.setPen(QColor("#a99"))
-            qp.drawText(int((x0 + x1) / 2 - 45), int(pad_t + 4), 90, 14,
-                        Qt.AlignCenter, "GC clamp")
 
-        def g_alt(i):
-            v = self._mark_idx if self._mark_idx is not None else 0
-            return i if i < v else i + self._indel
+        # GC-clamp tails (grey, outside the amplicon frame — never a primer)
+        clamp_tails = {}
+        for d in self._datasets:
+            cl = max(0, int(d.get("clamp_len", 0)))
+            side = d.get("clamp_side")
+            if not cl or side not in ("5'", "3'"):
+                continue
+            amp = max(len(d.get("ref_prof") or []) - cl, 0)
+            a = -cl if side == "5'" else amp
+            b = 0 if side == "5'" else amp + cl
+            clamp_tails.setdefault(side, []).append((a, b))
+        for side, tails in clamp_tails.items():
+            x0 = min(self._x(a, plot_w) for a, _ in tails)
+            x1 = max(self._x(b, plot_w) for _, b in tails)
+            qp.setPen(Qt.NoPen)
+            qp.setBrush(QColor("#efeceb"))
+            qp.drawRect(int(x0), int(pad_t), int(max(x1 - x0, 2)),
+                        int(plot_h))
+            qp.setPen(QColor("#b6a9a4"))
+            qp.setFont(QFont("Helvetica", 7, QFont.Bold))
+            qp.drawText(int((x0 + x1) / 2 - 46), int(pad_t + 5), 92, 12,
+                        Qt.AlignHCenter,
+                        f"GC clamp {side}")
 
-        # wt minus mutant melt separation (wt/mut pairs only)
-        self._draw_delta_band(qp, n, pad_l, pad_t, plot_w, plot_h)
+        # per-pair wt/mut separation band in that item's colour
+        for d in self._datasets:
+            self._draw_delta_band(qp, d, plot_w, plot_h)
 
-        # wildtype (black)
+        # curves: solid reference / dashed mutant, one colour per item
         qp.setBrush(Qt.NoBrush)
-        qp.setPen(QColor("#222"))
-        self._draw_path(qp, ((i, t) for i, t in enumerate(self._ref)),
-                        lambda i: i, n, pad_l, pad_t, plot_w, plot_h, 1.6)
+        for d in self._datasets:
+            ref = d.get("ref_prof") or []
+            color = d["color"]
+            pts = [(self._x(self.substrate_x(d, i), plot_w),
+                    self._y(t, plot_h)) for i, t in enumerate(ref)]
+            self._draw_polyline(qp, pts, color, 1.6)
+            alt = d.get("alt_prof") or []
+            if alt and d.get("paired"):
+                pts = [(self._x(self.substrate_x(d, i), plot_w),
+                        self._y(t, plot_h)) for i, t in enumerate(alt)]
+                self._draw_polyline(qp, pts, color, 1.2, dash=True)
 
-        # mutant (dashed red) unless it coincides with the wildtype
-        if self._alt:
-            pen = QPen(QColor("#C22"))
-            pen.setWidthF(1.2)
-            pen.setStyle(Qt.DashLine)
-            qp.setPen(pen)
-            self._draw_path(qp, ((i, t) for i, t in enumerate(self._alt)),
-                            g_alt, n, pad_l, pad_t, plot_w, plot_h, 1.2)
-
-        # mutation / variant mark
-        if self._mark_idx is not None and 0 <= self._mark_idx < n:
-            x = self._xf(self._mark_idx, pad_l, plot_w, n)
-            qp.setPen(QPen(QColor("#D22")))
-            qp.drawLine(int(x), int(pad_t), int(x), int(pad_t + plot_h))
-            qp.setPen(QColor("#D22"))
-            qp.setFont(QFont("Helvetica", 8, QFont.Bold))
-            qp.drawText(int(x + 5), int(pad_t + 12), 90, 14,
-                        Qt.AlignLeft | Qt.AlignVCenter,
-                        self._mark_label or "variant")
-
-        # primer regions (the GC clamp is not part of the primer)
-        self._draw_primer_marks(qp, n, pad_l, pad_r, pad_t, plot_w, plot_h)
-
-        # footer caption
+        # axes: y grid + labels, x grid labelled with amplicon base numbers
         qp.setFont(QFont("Helvetica", 8))
+        step = max(int(math.ceil((self._data_y1 - self._data_y0) / 12)), 5)
+        for t in range(int(self._data_y0 // step) * step,
+                       int(self._data_y1) + 1, step):
+            if t < self._data_y0 or t > self._data_y1:
+                continue
+            y = self._y(t, plot_h)
+            qp.setPen(QColor("#e4e4e4"))
+            qp.drawLine(int(pad_l), int(y), int(w - pad_r), int(y))
+            qp.setPen(QColor("#888"))
+            qp.drawText(int(pad_l - 46), int(y - 7), 42, 14,
+                        Qt.AlignRight | Qt.AlignVCenter, f"{t:g} °C")
+
+        qp.setPen(QColor("#a8a8a8"))
+        qp.drawLine(int(pad_l), int(pad_t), int(pad_l),
+                    int(pad_t + plot_h))
+        qp.drawLine(int(pad_l), int(pad_t + plot_h),
+                    int(w - pad_r), int(pad_t + plot_h))
+
+        qp.setFont(QFont("Helvetica", 7))
+        tick = 20 if span_x > 180 else 10 if span_x > 90 else 5
+        for b in range(0, span_x + 1, tick):
+            x = self._x(b, plot_w)
+            if not (pad_l - 1 <= x <= w - pad_r + 1):
+                continue
+            qp.setPen(QColor("#cfcfcf"))
+            qp.drawLine(int(x), int(pad_t + plot_h),
+                        int(x), int(pad_t + plot_h + 3))
+            qp.setPen(QColor("#777"))
+            qp.drawText(int(x - 14), int(pad_t + plot_h + 2), 28, 12,
+                        Qt.AlignHCenter, str(b + 1))
         qp.setPen(QColor("#999"))
-        if self._paired and self._alt:
-            cap = ("black = wildtype    dashed red = mutant    "
-                   "shaded = melt separation    blue = primers    (5'->3')")
-        elif self._alt:
-            cap = ("black = reference    dashed red = variant    "
-                   "blue = primers    (5'->3')")
-        else:
-            cap = "reference melt map    blue = primers    (5'->3')"
-        qp.drawText(int(pad_l), h - 20, plot_w, 16, Qt.AlignLeft, cap)
+        qp.drawText(int(w - pad_r - 200), h - 13, 200, 12,
+                    Qt.AlignRight,
+                    "amplicon base 1…N · wheel/± zoom · drag pan · "
+                    "double-click reset")
+
+        self._draw_legend(qp, plot_w, plot_h)
+
+    # ---------------------------------------------------------- interactions - #
+    def wheelEvent(self, event):                        # noqa: N802
+        pos = event.position()
+        plot_w = max(self.width() - self._pad_l - self._pad_r, 1)
+        frac = max((pos.x() - self._pad_l) / plot_w, 0.0)
+        frac = min(frac, 1.0)
+        delta = event.angleDelta().y()
+        if delta:
+            self._zoom_at(frac, 1.35 if delta > 0 else 1.0 / 1.35)
+        event.accept()
+
+    def mousePressEvent(self, event):                   # noqa: N802
+        if event.button() == Qt.LeftButton:
+            self._drag = (event.position().x(),
+                          self._view_x0, self._view_x1)
+            event.accept()
+
+    def mouseMoveEvent(self, event):                    # noqa: N802
+        if self._drag is not None:
+            x_0, vx0, vx1 = self._drag
+            plot_w = max(self.width() - self._pad_l - self._pad_r, 1)
+            dx = event.position().x() - x_0
+            span = vx1 - vx0
+            dspan = span * dx / plot_w
+            self._view_x0 = max(self._data_x0, vx0 - dspan)
+            self._view_x1 = min(self._data_x1, vx1 - dspan)
+            self.update()
+
+    def mouseReleaseEvent(self, event):                 # noqa: N802
+        self._drag = None
+
+    def mouseDoubleClickEvent(self, event):             # noqa: N802
+        self.fit()
+        event.accept()
