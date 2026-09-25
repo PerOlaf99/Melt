@@ -1,4 +1,5 @@
 """Input dialogs for the varmelt GUI: paste sequences / wt-mut pairs."""
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QFormLayout,
                                QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit,
                                QVBoxLayout)
@@ -107,3 +108,57 @@ class AddPairDialog(QDialog):
         mut = self.mut_edit.toPlainText()
         return Item(kind="pair", name=self.name_edit.text().strip() or "pair",
                     wt=wt, mut=mut, clamp=self.clamp_row.value())
+
+
+class EditItemDialog(QDialog):
+    """Edit the name and sequence(s) of an existing item.
+
+    For a single-sequence item, changing any base converts the item into a
+    wildtype/mutant pair: the saved copy stays the wildtype and the edited
+    copy becomes the mutant, so the difference is plotted as the variant /
+    mutation.  A wt/mut pair shows both strings directly.
+    """
+
+    def __init__(self, parent=None, item: Item = None):
+        super().__init__(parent)
+        self.setWindowTitle("Edit item")
+        self.setMinimumWidth(580)
+        form = QFormLayout(self)
+        self.name_edit = QLineEdit(getattr(item, "name", ""))
+        self.is_pair = getattr(item, "kind", "seq") == "pair"
+        self.name_edit.setPlaceholderText("name")
+        form.addRow("Name", self.name_edit)
+
+        if self.is_pair:
+            self.wt_edit = QPlainTextEdit(getattr(item, "wt", ""))
+            self.mut_edit = QPlainTextEdit(getattr(item, "mut", ""))
+            self.wt_edit.setMinimumHeight(96)
+            self.mut_edit.setMinimumHeight(96)
+            form.addRow("Wildtype (5'->3')", self.wt_edit)
+            form.addRow("Mutant (5'->3')", self.mut_edit)
+            hint = QLabel("<span style='font-size:11px;color:#888'>"
+                          "Edit any base(s) of either string.  (Optional "
+                          "FASTA-style headers and whitespace are ignored.)"
+                          "</span>")
+        else:
+            self.seq_edit = QPlainTextEdit(getattr(item, "seq", ""))
+            self.seq_edit.setMinimumHeight(150)
+            form.addRow("Sequence (5'->3')", self.seq_edit)
+            hint = QLabel("<span style='font-size:11px;color:#888'>"
+                          "Change any base(s) here: the edited copy is "
+                          "treated as the <b>mutant</b> of the original "
+                          "sequence and the item becomes a wildtype/mutant "
+                          "pair (difference plotted as the variant).  Leave "
+                          "it unchanged to keep a single amplicon.</span>")
+        hint.setWordWrap(True)
+        form.addRow("", hint)
+        form.addRow("", _ok_buttons(self, "OK"))
+
+    def sequences(self):
+        """Return (name, wt, mut) normalized at the source end (wt may equal
+        mut for a single-sequence item that was left untouched)."""
+        name = self.name_edit.text().strip()
+        if self.is_pair:
+            return (name, self.wt_edit.toPlainText(),
+                    self.mut_edit.toPlainText())
+        return (name, self.seq_edit.toPlainText(), None)

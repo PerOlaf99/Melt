@@ -71,6 +71,7 @@ def test_model_compute_roundtrip():
 def test_chart_renders_png():
     from PySide6.QtWidgets import QApplication
     from varmelt.gui.main import MainWindow
+    from varmelt.primers import GC_CLAMP
 
     app = QApplication.instance() or QApplication([])
     win = MainWindow()
@@ -82,7 +83,8 @@ def test_chart_renders_png():
     win._recompute_current()
     it = win._current_item()
     ok(not it.error, "chart item computes")
-    ok(len(win.chart._ref) == len(SEQ), "chart has ref profile")
+    ok(len(win.chart._ref) == len(SEQ) + len(GC_CLAMP),
+       "chart shows 5' clamp bases in the curve")
     ok(len(win.chart._alt) == 0, "seq mode: no alt curve")
     pm = win.chart.grab()
     ok(not pm.isNull(), "chart paints to pixmap")
@@ -95,8 +97,11 @@ def test_chart_renders_png():
     win._recompute_current()
     it = win._current_item()
     ok(not it.error, "pair item computes")
-    ok(len(win.chart._alt) == len(MUT), "pair mode: alt curve present")
-    ok(win.chart._mark_idx == 40, "mutation mark set")
+    ok(len(win.chart._ref) == len(SEQ) + len(GC_CLAMP),
+       "pair: 3' clamp extends ref curve")
+    ok(len(win.chart._alt) == len(MUT) + len(GC_CLAMP),
+       "pair mode: alt curve with clamp present")
+    ok(win.chart._mark_idx == 40, "mutation mark preserved after clamp")
     ok(win.chart._paired is True, "paired flag on chart")
 
     row = win._csv_row(it)
@@ -105,6 +110,54 @@ def test_chart_renders_png():
        "product start/end/length in csv row")
     win._refresh_list()
     ok(win.list.count() == 2, "two rows in amplikon list")
+
+
+def test_edit_duplicate_delete():
+    from PySide6.QtWidgets import QApplication
+    from varmelt.gui.dialogs import EditItemDialog
+    from varmelt.gui.main import MainWindow
+    from varmelt import cli
+
+    app = QApplication.instance() or QApplication([])
+    win = MainWindow()
+    win.project.add(Item(kind="seq", name="frag", seq=SEQ, clamp="5'"))
+    win._refresh_list()
+    win.list.setCurrentRow(0)
+    win._recompute_current()
+
+    # duplicate
+    win._duplicate_item()
+    ok(len(win.project.items) == 2, "duplicate appends a new item")
+    dup = win.project.items[1]
+    ok(dup.name == "frag (copy)" and dup.seq == SEQ,
+       "duplicate copies sequence + name suffix")
+    ok(dup.clamp == "5'", "duplicate copies clamp")
+    win._recompute_current()
+    ok(not dup.error, "duplicate recomputes cleanly")
+
+    # edit a seq item into a wt/mut pair by changing one base
+    target = win.project.items[1]
+    dlg = EditItemDialog(win, target)
+    dlg.seq_edit.setPlainText(MUT)
+    win._apply_edit(target, dlg)
+    ok(target.kind == "pair", "base edit converts item to wt/mut pair")
+    ok(target.wt == SEQ and target.mut == MUT,
+       "original kept as wildtype, edited copy as mutant")
+    win._recompute_current()
+    ok(not target.error, "converted pair recomputes")
+
+    # keep it a sequence when untouched
+    dlg2 = EditItemDialog(win, win.project.items[0])
+    win._apply_edit(win.project.items[0], dlg2)
+    ok(win.project.items[0].kind == "seq", "unchanged edit keeps seq kind")
+
+    # delete
+    before = len(win.project.items)
+    win.list.setCurrentRow(1)
+    win._remove_item()
+    ok(len(win.project.items) == before - 1, "delete removes the item")
+    ok(all(i.kind == "seq" for i in win.project.items),
+       "remaining items intact after delete")
 
 
 def test_project_schema():
@@ -146,6 +199,7 @@ def test_dialogs_and_filter_string():
 if __name__ == "__main__":
     test_model_compute_roundtrip()
     test_project_schema()
+    test_edit_duplicate_delete()
     test_chart_renders_png()
     print("\n" + ("ALL GUI TESTS PASSED" if failures == 0
                   else f"{failures} FAILURE(S)"))

@@ -11,7 +11,8 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QDoubleSpinBox,
                                QTableWidget, QTableWidgetItem, QVBoxLayout,
                                QWidget, QAbstractItemView)
 
-from .dialogs import AddPairDialog, AddSequenceDialog
+from .. import cli
+from .dialogs import AddPairDialog, AddSequenceDialog, EditItemDialog
 from .model import CLAMP_SIDES, Item, Project
 from .plot import MeltChart
 
@@ -65,13 +66,24 @@ class MainWindow(QMainWindow):
         b_add.clicked.connect(self._add_sequence)
         b_plus = QPushButton("+ wt/mut")
         b_plus.clicked.connect(self._add_pair)
-        b_del = QPushButton("Remove")
+        b_edit = QPushButton("Edit…")
+        b_edit.clicked.connect(self._edit_item)
+        b_dup = QPushButton("Duplicate")
+        b_dup.clicked.connect(self._duplicate_item)
+        b_del = QPushButton("Delete")
         b_del.clicked.connect(self._remove_item)
         row.addWidget(b_add)
         row.addWidget(b_plus)
+        row.addWidget(b_edit)
+        row.addWidget(b_dup)
         row.addWidget(b_del)
         lay.addLayout(row)
-        left.setMaximumWidth(340)
+        self._edit_button = b_edit
+        self._dup_button = b_dup
+        self._del_button = b_del
+        self.list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.list.customContextMenuRequested.connect(self._context_menu)
+        left.setMaximumWidth(360)
         splitter.addWidget(left)
 
         # right: chart + settings + table
@@ -181,12 +193,107 @@ class MainWindow(QMainWindow):
             self._refresh_list()
             self._recompute_current()
 
+    def _normalise_or_warn(self, text: str) -> str:
+        try:
+            return cli._normalise_pasted_dna(text)
+        except ValueError as exc:
+            QMessageBox.warning(self, "varmelt melt", str(exc))
+            raise
+
+    def _edit_item(self):
+        it = self._current_item()
+        if it is None:
+            return
+        dlg = EditItemDialog(self, it)
+        if dlg.exec() and self._apply_edit(it, dlg):
+            self._refresh_list()
+            self._recompute_current()
+            self.statusBar().showMessage(f"edited {it.name}", 2000)
+
+    def _apply_edit(self, it: Item, dlg) -> bool:
+        """Apply a filled-in EditItemDialog to *it*. Returns False and warns
+        when the sequences are empty or non-ACGT."""
+        try:
+            if dlg.is_pair:
+                wt = self._normalise_or_warn(dlg.sequences()[1])
+                mut = self._normalise_or_warn(dlg.sequences()[2])
+                if not wt or not mut:
+                    raise ValueError("both sequences may not be empty")
+                it.kind = "pair"
+                it.wt, it.mut = wt, mut
+                it.seq = ""
+            else:
+                seq = self._normalise_or_warn(dlg.sequences()[1])
+                if not seq:
+                    raise ValueError("sequence may not be empty")
+                if it.kind == "seq":
+                    if seq == it.seq:
+                        it.seq = seq
+                    else:
+                        # single-sequence item edited: original stays the
+                        # wildtype, the edited copy becomes the mutant
+                        it.kind = "pair"
+                        it.wt, it.mut = it.seq, seq
+                        it.seq = ""
+                else:
+                    # pair item edited through a single field: treat the
+                    # edited copy as the mutant of the current wildtype
+                    it.kind = "pair"
+                    it.wt, it.mut = it.wt or it.seq, seq
+                    it.seq = ""
+        except ValueError as exc:
+            QMessageBox.warning(self, "varmelt melt", str(exc))
+            return False
+        name = dlg.sequences()[0]
+        if name:
+            it.name = name
+        return True
+
+    def _duplicate_item(self):
+        it = self._current_item()
+        if it is None:
+            return
+        clone = Item.from_dict(it.to_dict())
+        clone.result = None
+        clone.error = ""
+        base, sep, _tail = it.name.rpartition("(copy)")
+        clone.name = (base + "(copy)").strip() if sep \
+            else it.name + " (copy)"
+        self.project.items.insert(self.list.currentRow() + 1, clone)
+        self._refresh_list()
+        self._select_index(self.project.items.index(clone))
+        self.statusBar().showMessage(f"duplicated {it.name} as {clone.name}",
+                                     2000)
+
+    def _context_menu(self, pos):
+        it = self._current_item()
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        menu.addAction("Edit…", self._edit_item)
+        menu.addAction("Duplicate", self._duplicate_item)
+        if it is not None:
+            menu.addAction("Rename", self._rename_item)
+        menu.addAction("Delete", self._remove_item)
+        menu.exec(self.list.viewport().mapToGlobal(pos))
+
+    def keyPressEvent(self, event):                 # noqa: N802
+        if event.key() in (Qt.Key_Delete, Qt.Key_Backspace) and \
+                self._current_item() is not None:
+            self._remove_item()
+            return
+        super().keyPressEvent(event)
+
     def _remove_item(self):
+        it = self._current_item()
+        if it is None:
+            return
         i = self.list.currentRow()
+        name = it.name
         if 0 <= i < len(self.project.items):
             del self.project.items[i]
             self._refresh_list()
             self._recompute_current()
+            self.statusBar().showMessage(f"deleted {name}", 2000)
 
     def _new_project(self):
         self.project = Project()
@@ -399,13 +506,7 @@ class MainWindow(QMainWindow):
             return
         r = it.result
         pair = it.pair()
-        indel = r.get("indel", len(r["refseq"]) - len(r.get("altseq") or
-                                                       r["refseq"]))
-        self.chart.set_map(
-            r["ref_prof"], r["alt_prof"], seq=r["refseq"],
-            clamp_len=it.clamp_length(), clamp_side=it.clamp_side(),
-            mark_idx=it.mark_idx(), mark_label="mutation",
-            indel=indel, paired=bool(r.get("paired")))
+        self.chart.set_map(**it.fragment_profiles(self.project.na))
 
         kind = it.kind_label()
         dnalen = r.get("dnalen") or len(r["refseq"])

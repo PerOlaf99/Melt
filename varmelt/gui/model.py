@@ -67,6 +67,50 @@ class Item:
             return r["idx"]
         return None
 
+    def fragment_profiles(self, na: float) -> dict:
+        """Per-base melt profiles of the *physical fragment*, i.e. the
+        amplicon with the GC-clamp oligo appended to the end it occupies
+        (same convention as the web overview / ``report.render_fragment_svg``);
+        the clamp therefore contributes real bases to the melting curve.
+        """
+        from .. import reference as refmod
+        from ..primers import GC_CLAMP
+        from ..report import _fragment_variant
+        r = self.result
+        if not r or self.error:
+            return None
+        ref_seq = r["refseq"]
+        alt_seq = r.get("altseq") or ref_seq
+        paired = bool(r.get("paired"))
+        ps, pe = 0, len(ref_seq) - 1
+
+        side = self.clamp_side()
+        clamp_len = len(GC_CLAMP) if side in ("5'", "3'") else 0
+        frag_ref = ref_seq[ps:pe + 1] if ps <= pe else ""
+        frag_alt = alt_seq[ps:pe + 1] if ps <= pe else ""
+        if side == "5'":
+            frag_ref_c, frag_alt_c = GC_CLAMP + frag_ref, GC_CLAMP + frag_alt
+        elif side == "3'":
+            frag_ref_c, frag_alt_c = frag_ref + GC_CLAMP, frag_alt + GC_CLAMP
+        else:
+            frag_ref_c, frag_alt_c, clamp_len = frag_ref, frag_alt, 0
+
+        ref_prof = refmod.calc_tm_profile(frag_ref_c, Na=na)
+        alt_prof = (refmod.calc_tm_profile(frag_alt_c, Na=na)
+                    if paired else None)
+
+        var_idx = self.mark_idx()
+        mark = None
+        if var_idx is not None and ps <= var_idx <= pe:
+            mark, _ = _fragment_variant(
+                len(frag_ref), side, len(GC_CLAMP), var_idx, ps, pe)
+        indel = (len(frag_ref_c) - len(frag_alt_c)
+                 if alt_prof is not None else 0)
+        return {"seq": frag_ref_c, "ref_prof": ref_prof,
+                "alt_prof": alt_prof, "clamp_len": clamp_len,
+                "clamp_side": side, "mark_idx": mark, "indel": indel,
+                "paired": paired}
+
     def to_dict(self) -> dict:
         d = {"kind": self.kind, "name": self.name, "clamp": self.clamp}
         if self.kind == "seq":

@@ -45,13 +45,13 @@ class MeltChart(QWidget):
         self._status = status
         self.update()
 
-    def set_map(self, ref_profile, alt_profile=None, seq="", clamp_len=0,
+    def set_map(self, ref_prof, alt_prof=None, seq="", clamp_len=0,
                 clamp_side=None, mark_idx=None, mark_label="mutation",
                 indel=0, paired=False):
-        self._ref = list(ref_profile) if ref_profile is not None else []
-        self._alt = (list(alt_profile)
-                     if alt_profile is not None
-                     and list(alt_profile) != list(ref_profile) else [])
+        self._ref = list(ref_prof) if ref_prof is not None else []
+        self._alt = (list(alt_prof)
+                     if alt_prof is not None
+                     and list(alt_prof) != list(ref_prof) else [])
         self._seq = seq
         self._clamp_len = max(0, int(clamp_len))
         self._clamp_side = clamp_side
