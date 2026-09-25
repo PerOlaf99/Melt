@@ -289,6 +289,27 @@ reference test sequences.
 All of this lives in `varmelt/reference.py`; there is no separate two-state
 dynamic-programming module anymore.
 
+## Species coverage
+
+The melting core and the primer design are organism-agnostic: they consume a
+DNA string and know nothing about genomes, contigs or species. The *hg19 /
+hg38* restriction is a restriction on how a reference window is **named and
+fetched**, not on the physics.
+
+This has been verified end to end on real sequence from a bacterium, two
+viruses and a plant, with no changes to `varmelt`:
+
+```bash
+python examples/nonhuman_demo.py
+python -m varmelt.gui /tmp/varmelt_nonhuman_demo.varmelt.json
+```
+
+Note that the UCSC REST API — the only network sequence source — hosts no
+plant and no bacterial genomes, so reaching those species needs a local
+genome file rather than a longer build list. See
+[`docs/non-human-genomes.md`](docs/non-human-genomes.md) for what is
+human-only today, the measured results, and the recommended way to generalise.
+
 ## Tests
 
 ```bash
