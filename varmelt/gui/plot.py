@@ -72,6 +72,25 @@ class MeltChart(QWidget):
         return pad_t + (1.0 - (max(float(t), self._xmin) - self._xmin)
                         / (self._xmax - self._xmin)) * plot_h
 
+    def _amp(self):
+        """0-based fragment coordinates: the GC-clamp oligo is *not* part of
+        the primer, so the primers live inside the amplicon which sits after
+        the clamp on the 5' side and before it on the 3' side."""
+        n = len(self._ref)
+        cl = min(self._clamp_len, n) if self._clamp_side in ("5'", "3'") \
+            else 0
+        amp = n - cl
+        offset = cl if self._clamp_side == "5'" else 0
+        return offset, amp, n
+
+    def primer_regions(self):
+        """((fp0, fp1), (rp0, rp1)): half-open primer base intervals in
+        fragment coordinates.  With a left GC clamp the forward primer
+        starts at base ``len(GC_CLAMP)`` (0-based), i.e. base 43 1-based."""
+        offset, amp, n = self._amp()
+        return ((offset, min(offset + 20, n)),
+                (max(offset + amp - 20, 0), offset + amp))
+
     def _draw_path(self, qp, prof, g, n, pad_l, pad_t, plot_w, plot_h, width):
         pen = qp.pen()
         pen.setWidthF(width)
@@ -130,13 +149,57 @@ class MeltChart(QWidget):
                 bot.append((x, yr))
         flush(top, bot)
 
+    def _draw_ruler(self, qp, n, pad_l, pad_r, plot_w):
+        """Base numbers above the map; primer starts get a marked caret."""
+        y0, y1 = 14, 20
+        qp.setFont(QFont("Helvetica", 7))
+        every = 20
+        for b in range(0, n, every):
+            x = self._xf(b, pad_l, plot_w, n)
+            qp.setPen(QColor("#bbb"))
+            qp.drawLine(int(x), y0, int(x), y1)
+            qp.setPen(QColor("#888"))
+            if n > 120 and b % (every * 2) and b != 0:
+                continue                        # fewer labels when crowded
+            qp.drawText(int(x - 16), y1 + 1, 32, 10, Qt.AlignHCenter,
+                        str(b + 1))
+        fp_reg, rp_reg = self.primer_regions()
+        for x0, x1 in (fp_reg, rp_reg):
+            if x1 <= x0:
+                continue
+            x = self._xf(x0, pad_l, plot_w, n)
+            qp.setPen(QColor("#3a6fa8"))
+            qp.drawLine(int(x), y0, int(x), y0 + 5)
+        qp.setPen(QColor("#bbb"))
+        qp.drawLine(pad_l, y1 + 1, pad_l + plot_w, y1 + 1)
+
+    def _draw_primer_marks(self, qp, n, pad_l, pad_r, pad_t, plot_w, plot_h):
+        """Outline the primer regions (excluding the GC clamp) and label them
+        FP / RP so the primers are not confused with the plain clamp."""
+        fp_reg, rp_reg = self.primer_regions()
+        pen = QPen(QColor("#3a6fa8"))
+        pen.setWidthF(1.1)
+        for label, (a, b) in (("FP", fp_reg), ("RP", rp_reg)):
+            if b <= a:
+                continue
+            xa = self._xf(a, pad_l, plot_w, n)
+            xb = self._xf(max(b - 1, a), pad_l, plot_w, n) + 1
+            qp.setPen(pen)
+            qp.drawLine(int(xa), int(pad_t + 2), int(xb), int(pad_t + 2))
+            qp.drawLine(int(xa), int(pad_t + plot_h - 2),
+                        int(xb), int(pad_t + plot_h - 2))
+            qp.setPen(QColor("#3a6fa8"))
+            qp.setFont(QFont("Helvetica", 7, QFont.Bold))
+            qp.drawText(int(xa + 4), int(pad_t + 3), 26, 10,
+                        Qt.AlignLeft, label)
+
     # -- painting --------------------------------------------------------- #
     def paintEvent(self, event):                        # noqa: N802
         qp = QPainter(self)
         qp.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
         qp.fillRect(0, 0, w, h, QColor("white"))
-        pad_l, pad_r, pad_t, pad_b = 46, 12, 10, 26
+        pad_l, pad_r, pad_t, pad_b = 46, 12, 30, 26
         plot_w, plot_h = w - pad_l - pad_r, h - pad_t - pad_b
 
         if not self._ref:
@@ -145,6 +208,9 @@ class MeltChart(QWidget):
             return
 
         n = len(self._ref)
+
+        # base-number ruler + primer region markers
+        self._draw_ruler(qp, n, pad_l, pad_r, plot_w)
 
         # grid + y labels
         qp.setFont(QFont("Helvetica", 8))
@@ -207,14 +273,18 @@ class MeltChart(QWidget):
                         Qt.AlignLeft | Qt.AlignVCenter,
                         self._mark_label or "variant")
 
+        # primer regions (the GC clamp is not part of the primer)
+        self._draw_primer_marks(qp, n, pad_l, pad_r, pad_t, plot_w, plot_h)
+
         # footer caption
         qp.setFont(QFont("Helvetica", 8))
         qp.setPen(QColor("#999"))
         if self._paired and self._alt:
             cap = ("black = wildtype    dashed red = mutant    "
-                   "shaded = melt separation    (5'->3')")
+                   "shaded = melt separation    blue = primers    (5'->3')")
         elif self._alt:
-            cap = "black = reference    dashed red = variant    (5'->3')"
+            cap = ("black = reference    dashed red = variant    "
+                   "blue = primers    (5'->3')")
         else:
-            cap = "reference melt map    (5'->3')"
+            cap = "reference melt map    blue = primers    (5'->3')"
         qp.drawText(int(pad_l), h - 20, plot_w, 16, Qt.AlignLeft, cap)

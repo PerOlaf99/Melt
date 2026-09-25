@@ -61,8 +61,15 @@ opens a saved project on start.
   overlaid dashed red, the GC-clamp oligo shaded grey at the end it occupies,
   the mutation base marked, and the pink area between the wt and mutant
   curves showing the melt separation, with the ΔTm in the panel header).
+- The GC clamp is drawn as a grey tail and is *not* part of the primer:
+  a base ruler above the map and FP/RP markers show the forward primer
+  starting after the clamp (base 43 for a 42-base left clamp), and the
+  reported primer sequences are the bare 20-mers.
 - Live adjustment: change the salt (Na+) or the selected amplicon's GC
   clamp and the map, Tm and primer set re-plot right away.
+- The **primer table** under the chart is editable in place and has a
+  ``Copy`` button (tab-separated) and a ``Save CSV…`` button, so a chosen
+  set can be tweaked and exported for the lab bench.
 - File menu: New / Open / Save / Save As (`*.varmelt.json`), export the
   chart image as PNG and all primer sets as CSV.  Projects store the pasted
   sequences and settings only; profiles are recomputed from the engine on

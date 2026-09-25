@@ -5,12 +5,13 @@ import sys
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QGuiApplication
-from PySide6.QtWidgets import (QApplication, QComboBox, QDoubleSpinBox,
-                               QFileDialog, QHBoxLayout, QInputDialog,
-                               QLabel, QListWidget, QListWidgetItem,
-                               QMainWindow, QMessageBox, QMenu, QSplitter,
-                               QTableWidget, QTableWidgetItem, QVBoxLayout,
-                               QWidget, QAbstractItemView)
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox,
+                               QDoubleSpinBox, QFileDialog, QHeaderView,
+                               QHBoxLayout, QInputDialog, QLabel, QListWidget,
+                               QListWidgetItem, QMainWindow, QMenu,
+                               QMessageBox, QPushButton, QScrollArea,
+                               QSizePolicy, QSplitter, QTableWidget,
+                               QTableWidgetItem, QVBoxLayout, QWidget)
 
 from .. import cli
 from .dialogs import AddPairDialog, AddSequenceDialog, EditItemDialog
@@ -62,35 +63,49 @@ class MainWindow(QMainWindow):
         self.list.setSelectionMode(QAbstractItemView.SingleSelection)
         lay.addWidget(self.list)
 
-        from PySide6.QtWidgets import QLabel as _L
-        tip = _L("<small>tick a row to plot it — several charts are shown "
-                 "at once</small>")
+        tip = QLabel("<small>tick a row to plot it — several charts are "
+                     "shown at once</small>")
         tip.setWordWrap(True)
         lay.addWidget(tip)
 
-        row = QHBoxLayout()
-        from PySide6.QtWidgets import QPushButton
+        # two clean button rows instead of one crowded line: add-actions on
+        # top, item actions below (disabled until a row is selected)
+        row_add = QHBoxLayout()
+        row_act = QHBoxLayout()
         b_add = QPushButton("+ sequence")
+        b_add.setToolTip("Add a DNA sequence to analyse")
         b_add.clicked.connect(self._add_sequence)
         b_plus = QPushButton("+ wt/mut")
+        b_plus.setToolTip("Add a wildtype/mutant pair")
         b_plus.clicked.connect(self._add_pair)
         b_edit = QPushButton("Edit…")
+        b_edit.setToolTip("Edit the selected amplicon (e.g. change a base)")
         b_edit.clicked.connect(self._edit_item)
         b_dup = QPushButton("Duplicate")
+        b_dup.setToolTip("Copy the selected amplicon")
         b_dup.clicked.connect(self._duplicate_item)
         b_del = QPushButton("Delete")
+        b_del.setToolTip("Remove the selected amplicon")
         b_del.clicked.connect(self._remove_item)
-        row.addWidget(b_add)
-        row.addWidget(b_plus)
-        row.addWidget(b_edit)
-        row.addWidget(b_dup)
-        row.addWidget(b_del)
-        lay.addLayout(row)
+        for b in (b_add, b_plus, b_edit, b_dup, b_del):
+            b.setMinimumHeight(30)
+            b.setFocusPolicy(Qt.NoFocus)
+        for b in (b_add, b_plus, b_edit, b_dup, b_del):
+            b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        row_add.addWidget(b_add)
+        row_add.addWidget(b_plus)
+        row_act.addWidget(b_edit)
+        row_act.addWidget(b_dup)
+        row_act.addWidget(b_del)
+        lay.addLayout(row_add)
+        lay.addLayout(row_act)
         self._edit_button = b_edit
         self._dup_button = b_dup
         self._del_button = b_del
+        self._update_action_buttons()
         self.list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._context_menu)
+        left.setMinimumWidth(280)
         left.setMaximumWidth(340)
         splitter.addWidget(left)
 
@@ -135,15 +150,38 @@ class MainWindow(QMainWindow):
         self._scroll = scroll
         rlay.addWidget(scroll, stretch=1)
 
-        rlay.addWidget(QLabel("<b>Primer set</b> (first/last 20 bases):"))
+        # primer-set report table (editable; copy / save it below)
+        header = QHBoxLayout()
+        header.addWidget(QLabel("<b>Primer set</b> (first/last 20 bases)"))
+        header.addStretch(1)
+        b_copy = QPushButton("Copy")
+        b_copy.setToolTip("Copy every row as tab-separated text")
+        b_copy.clicked.connect(self._copy_table)
+        header.addWidget(b_copy)
+        b_csv = QPushButton("Save CSV…")
+        b_csv.setToolTip("Export the primer set as a CSV file")
+        b_csv.clicked.connect(self._export_csv)
+        header.addWidget(b_csv)
+        rlay.addLayout(header)
+
         self.table = QTableWidget(0, 10)
         self.table.setHorizontalHeaderLabels(
             ["Forward primer", "Reverse primer", "Fwd Tm", "Rev Tm",
              "Product start", "Product end", "Length (bp)", "Mean Tm",
              "GC clamp", "Melting shape"])
         self.table.verticalHeader().setVisible(False)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.setMaximumHeight(170)
+        self.table.setMinimumHeight(110)
+        self.table.setMaximumHeight(230)
+        self.table.setAlternatingRowColors(True)
+        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectItems)
+        self.table.setEditTriggers(QAbstractItemView.DoubleClicked
+                                   | QAbstractItemView.EditKeyPressed)
+        head = self.table.horizontalHeader()
+        head.setSectionResizeMode(QHeaderView.Interactive)
+        for c in (0, 1):
+            head.setSectionResizeMode(c, QHeaderView.Stretch)
+        head.setMinimumSectionSize(70)
         rlay.addWidget(self.table)
 
         splitter.addWidget(right)
@@ -284,7 +322,6 @@ class MainWindow(QMainWindow):
 
     def _context_menu(self, pos):
         it = self._current_item()
-        from PySide6.QtWidgets import QMenu
         menu = QMenu(self)
         menu.addAction("Edit…", self._edit_item)
         menu.addAction("Duplicate", self._duplicate_item)
@@ -472,8 +509,9 @@ class MainWindow(QMainWindow):
             return None
         pair = it.pair()
         r = it.result
-        return [it.name, it.kind_label(), pair.fp_seq if pair else "",
-                pair.rp_seq if pair else "",
+        return [it.name, it.kind_label(),
+                r.get("fp") or (pair.fp_seq if pair else ""),
+                r.get("rp") or (pair.rp_seq if pair else ""),
                 f"{pair.fp_tm_melt:.2f}" if pair and pair.fp_tm_melt else "",
                 f"{pair.rp_tm_melt:.2f}" if pair and pair.rp_tm_melt else "",
                 pair.product_start if pair else "",
@@ -492,6 +530,12 @@ class MainWindow(QMainWindow):
 
     def _select_index(self, i: int):
         self.list.setCurrentRow(i)
+        self._update_action_buttons()
+
+    def _update_action_buttons(self):
+        enabled = self._current_item() is not None
+        for b in (self._edit_button, self._dup_button, self._del_button):
+            b.setEnabled(enabled)
 
     def _refresh_list(self):
         selected = None
@@ -524,6 +568,7 @@ class MainWindow(QMainWindow):
                         break
         finally:
             self.list.blockSignals(False)
+        self._update_action_buttons()
 
     def _on_item_changed(self, item):
         it = item.data(Qt.UserRole)
@@ -534,7 +579,25 @@ class MainWindow(QMainWindow):
             it.plot = new_state
             self._render_plots()
 
+    def _copy_table(self):
+        if not self.table.rowCount():
+            QMessageBox.information(self, "varmelt melt", "nothing to copy")
+            return None
+        lines = []
+        lines.append("\t".join(
+            self.table.horizontalHeaderItem(c).text()
+            for c in range(self.table.columnCount())))
+        for r in range(self.table.rowCount()):
+            lines.append("\t".join(
+                self.table.item(r, c).text() if self.table.item(r, c)
+                else "" for c in range(self.table.columnCount())))
+        text = "\n".join(lines)
+        QApplication.clipboard().setText(text)
+        self.statusBar().showMessage("primer set copied to clipboard", 2000)
+        return text
+
     def _on_select(self):
+        self._update_action_buttons()
         self._sync_controls_from_item()
         self._recompute_current()
 
@@ -601,7 +664,9 @@ class MainWindow(QMainWindow):
             f"<b>{it.clamp_side() or 'none'}</b>")
 
         self.table.setRowCount(1)
-        cols = [pair.fp_seq, pair.rp_seq,
+        fp_raw = r.get("fp") or (pair.fp_seq if pair else "")
+        rp_raw = r.get("rp") or (pair.rp_seq if pair else "")
+        cols = [fp_raw, rp_raw,
                 f"{pair.fp_tm_melt:.2f}" if pair.fp_tm_melt else "",
                 f"{pair.rp_tm_melt:.2f}" if pair.rp_tm_melt else "",
                 pair.product_start, pair.product_end, pair.product_length,

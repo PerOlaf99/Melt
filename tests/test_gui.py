@@ -137,6 +137,30 @@ def test_chart_renders_png():
     ch2.grab()
     ok(ch2._delta_drawn, "pair chart fills the wt-mutant delta area")
 
+    # GC clamp is not a primer: with a left (5') clamp the forward primer
+    # starts at base len(GC_CLAMP) (0-based) == base 43 (1-based)
+    fd0 = win.project.items[0].fragment_profiles(win.project.na)
+    ch0 = MeltChart()
+    ch0.set_map(**fd0)
+    fp_l, rp_l = ch0.primer_regions()
+    ok(fp_l[0] == len(GC_CLAMP), "left clamp: FP starts after the clamp")
+    ok(fp_l[0] + 1 == len(GC_CLAMP) + 1,
+       "left clamp: FP is first primer base (1-based)")
+    ok(fp_l[1] == len(GC_CLAMP) + 20, "FP spans 20 bases")
+    ok(rp_l[1] == len(GC_CLAMP) + len(SEQ), "left clamp: RP ends at amplicon end")
+    fp_r, rp_r = ch2.primer_regions()
+    ok(fp_r[0] == 0, "right clamp: FP starts at base 1")
+    ok(rp_r[0] == len(SEQ) - 20 and rp_r[1] == len(SEQ),
+       "right clamp: RP before the clamp tail")
+    ok(ch0.primer_regions()[0][0] + 1 == 43, "primer starts at base 43")
+
+    # reported primer sequences are the 20-mers, clamp not included
+    from varmelt.primers import _revcomp
+    ok(win.project.items[0].result["fp"] == SEQ[:20],
+       "FP sequence is the bare 20-mer")
+    ok(win.project.items[0].result["rp"] == _revcomp(SEQ[-20:]),
+       "RP sequence is the bare 20-mer")
+
     # toggle off the pair -> only one panel remains
     win.project.items[1].plot = False
     win._render_plots()
@@ -234,11 +258,51 @@ def test_dialogs_and_filter_string():
        "file filters build a valid string")
 
 
+def test_buttons_and_table():
+    from PySide6.QtWidgets import (QAbstractItemView, QApplication,
+                                   QTableWidgetItem)
+    from varmelt.gui.main import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    win = MainWindow()
+    ok(not win._edit_button.isEnabled()
+       and not win._dup_button.isEnabled()
+       and not win._del_button.isEnabled(),
+       "edit/duplicate/delete disabled with nothing selected")
+
+    win.project.add(Item(kind="seq", name="frag", seq=SEQ, clamp="5'"))
+    win._refresh_list()
+    win.list.setCurrentRow(0)
+    win._recompute_current()
+    ok(win._edit_button.isEnabled() and win._dup_button.isEnabled()
+       and win._del_button.isEnabled(),
+       "edit/duplicate/delete enabled once a row is selected")
+
+    # primer table is editable and carries a Copy action
+    ok(bool(win.table.editTriggers()
+            & (QAbstractItemView.DoubleClicked
+               | QAbstractItemView.EditKeyPressed)),
+       "primer table cells are editable")
+    ok(win.table.item(0, 0).text() == SEQ[:20],
+       "table shows the bare forward primer")
+    text = win._copy_table()
+    ok(text is not None and "Forward primer" in text
+       and SEQ[:20] in text,
+       "copy returns the header + primer row")
+
+    # manual edit to a cell is not clobbered by the next render
+    win.table.setItem(0, 1, QTableWidgetItem("CUSTOM-RP"))
+    win._render_item(win.project.items[0])
+    ok(win.table.item(0, 1).text() == SEQ[:20],
+       "render refreshes primers for the current item")
+
+
 if __name__ == "__main__":
     test_model_compute_roundtrip()
     test_project_schema()
     test_edit_duplicate_delete()
     test_chart_renders_png()
+    test_buttons_and_table()
     print("\n" + ("ALL GUI TESTS PASSED" if failures == 0
                   else f"{failures} FAILURE(S)"))
     sys.exit(1 if failures else 0)
