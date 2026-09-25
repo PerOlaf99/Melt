@@ -721,6 +721,7 @@ class MainWindow(QMainWindow):
                    f"diff at base {r['mut_idx'] + 1}"
                    f"{' plus GC clamp' if it.clamp_side() else ''})"
                    if r.get("paired") else "")
+        ctxnote = self._variant_context_html(r) if r.get("paired") else ""
         shape = str(r.get("melting_shape") or "")
         area = float(r.get("delta_area", 0.0) or 0.0)
         metrics = ""
@@ -733,7 +734,30 @@ class MainWindow(QMainWindow):
             f"<b>{it.name}</b> — {kind}, {dnalen} bp{altnote}<br>"
             f"forward primer <code>{r['fp']}</code> &nbsp; reverse primer "
             f"<code>{r['rp']}</code> &nbsp; clamp "
-            f"<b>{it.clamp_side() or 'none'}</b>{metrics}")
+            f"<b>{it.clamp_side() or 'none'}</b>{metrics}"
+            f"{ctxnote}")
+
+    @staticmethod
+    def _variant_context_html(r: dict) -> str:
+        """The wt->mut context with the changed base in red.
+
+        Users unfamiliar with the gene want to see where on the amplicon the
+        variant sits, so this renders ~12 flanks on each side and paints the
+        changed base (defined by ``idx``, the first differing position)
+        bold red with its wt->mut change.
+        """
+        i = int(r.get("idx") or -1)
+        wt = r.get("refseq") or ""
+        mut = r.get("altseq") or ""
+        if i < 0 or i >= len(wt) or i >= len(mut) or wt[i] == mut[i]:
+            return ""
+        w = 12
+        left = wt[max(0, i - w):i]
+        right = wt[i + 1:i + 1 + w]
+        return ("<br>context 5\u2032-" + left
+                + "<b><font color='#d41a1a'>" + wt[i] + "\u2192" + mut[i]
+                + "</font></b>" + right + "-3\u2032&nbsp; (base "
+                + str(i + 1) + ")")
 
     def _render_table(self):
         """Primer-set table: one row per computed amplicon (so every added

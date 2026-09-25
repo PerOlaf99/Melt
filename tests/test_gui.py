@@ -610,6 +610,17 @@ def test_example_menu_braf_silent_vs_v600e():
     ok(es["delta_area"] < ev["delta_area"] / 10,
        "the silent swap is an order of magnitude less visible than V600E")
 
+    # the mutant curve is always drawn red-dashed, and the info panel shows
+    # the changed base in red so the sequence context is visible at a glance
+    from varmelt.gui import plot as plotmod
+    ok(plotmod.MUTANT_COLOR == "#d41a1a", "mutant red is fixed")
+    d = win.chart._datasets[0]
+    ok(d.get("alt_prof") is not None, "pair ships an alt profile")
+    ctx = win._variant_context_html(ev)
+    ok("<font color='#d41a1a'>T\u2192A</font>" in ctx
+       and ctx.endswith("(base 81)"),
+       "context line paints the V600E T->A red at base 81")
+
 
 if __name__ == "__main__":
     test_model_compute_roundtrip()

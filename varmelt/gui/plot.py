@@ -28,6 +28,11 @@ from PySide6.QtWidgets import QSizePolicy, QWidget
 PALETTE = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e",
            "#17becf", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22"]
 
+# the mutant (alternative) curve is always drawn dashed in this red, no
+# matter how many wildtype items share the chart, so "red dashed" reads
+# as "the variant" at a glance.
+MUTANT_COLOR = "#d41a1a"
+
 
 def amp_start(clamp_side, clamp_len):
     """Substrate index of the first amplicon base for a clamped fragment."""
@@ -248,7 +253,7 @@ class MeltChart(QWidget):
             entries.append((d["color"], True, name, None))
             if d.get("paired") and d.get("alt_prof"):
                 area = float(d.get("delta_area", 0.0))
-                entries.append((d["color"], False,
+                entries.append((MUTANT_COLOR, False,
                                 f"mutant   \u0394area {area:.0f} \u00b0C\u00b7bp",
                                 d.get("name")))
         if not entries:
@@ -364,7 +369,7 @@ class MeltChart(QWidget):
                 alt_shift = float(d.get("alt_shift", 0) or 0)
                 pts = [(self._x(self.substrate_x(d, i) + alt_shift, plot_w),
                         self._y(t, plot_h)) for i, t in enumerate(alt)]
-                self._draw_polyline(qp, pts, color, 1.2, dash=True)
+                self._draw_polyline(qp, pts, MUTANT_COLOR, 1.2, dash=True)
         qp.restore()
 
         # axes: y grid + labels, x grid labelled with physical base numbers
