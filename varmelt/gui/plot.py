@@ -1,4 +1,4 @@
-"""QPainter-based melting-profile chart for the varmelt GUI.
+"""QPainter-based melting-profile chart for the MeltScope GUI.
 
 One canvas overlays the per-base melting maps of all ticked amplicons so
 they can be compared under the same conditions (CTCE).  The x-axis is the
@@ -33,6 +33,35 @@ PALETTE = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e",
 # as "the variant" at a glance.
 MUTANT_COLOR = "#d41a1a"
 
+# ---------------------------------------------------------------- chart skin
+# All non-data paint colours live here so the chart can follow the app theme
+# (QColor understands #RRGGBB and #AARRGGBB).
+_CHART_LIGHT = dict(
+    bg="#ffffff", status_text="#999999", legend_fill="#D7FFFFFF",
+    legend_border="#cccccc", legend_text="#333333",
+    amplicon_band="#f7fafd", clamp_fill="#efeceb", clamp_text="#b6a9a4",
+    grid="#e4e4e4", axis_text="#888888", axis_line="#a8a8a8",
+    tick="#cfcfcf", tick_text="#777777", hint="#999999",
+    rubber_fill="#375AA0DC", rubber_border="#3278BE",
+)
+
+_CHART_DARK = dict(
+    bg="#10141c", status_text="#7a8598", legend_fill="#D21A212B",
+    legend_border="#2a3140", legend_text="#d2d9e3",
+    amplicon_band="#161d29", clamp_fill="#1d2532", clamp_text="#5f6f82",
+    grid="#232b38", axis_text="#8a94a6", axis_line="#3a4353",
+    tick="#39414f", tick_text="#7f8a9c", hint="#667488",
+    rubber_fill="#3C7C6CF0", rubber_border="#7C6CF0",
+)
+
+_CHART_CUR = dict(_CHART_LIGHT)
+
+
+def set_chart_theme(name):
+    """Switch the chart's non-data colours ('light' | 'dark')."""
+    global _CHART_CUR
+    _CHART_CUR = dict(_CHART_DARK if name == "dark" else _CHART_LIGHT)
+
 
 def amp_start(clamp_side, clamp_len):
     """Substrate index of the first amplicon base for a clamped fragment."""
@@ -48,7 +77,7 @@ class MeltChart(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setAutoFillBackground(True)
         pal = self.palette()
-        pal.setColor(self.backgroundRole(), QColor("white"))
+        pal.setColor(self.backgroundRole(), QColor(_CHART_CUR["bg"]))
         self.setPalette(pal)
         self._datasets = []
         self._status = "tick an amplicon in the list to plot its melt map"
@@ -274,8 +303,8 @@ class MeltChart(QWidget):
         bw = padx * 2 + 18 + wmax
         bh = pady * 2 + row_h * len(entries)
         box = QRectF(x0 - bw, y, bw, bh)
-        qp.setBrush(QColor(255, 255, 255, 215))
-        qp.setPen(QPen(QColor("#ccc")))
+        qp.setBrush(QColor(_CHART_CUR["legend_fill"]))
+        qp.setPen(QPen(QColor(_CHART_CUR["legend_border"])))
         qp.drawRect(box)
         y += pady + fm.ascent() - 1
         sw = 12
@@ -290,7 +319,7 @@ class MeltChart(QWidget):
             qp.setPen(pen)
             qp.drawLine(int(sx), int(y - fm.ascent() / 2),
                         int(sx + sw), int(y - fm.ascent() / 2))
-            qp.setPen(QColor("#333"))
+            qp.setPen(QColor(_CHART_CUR["legend_text"]))
             qp.drawText(int(sx + sw + 5), int(y - fm.ascent()),
                         fm.horizontalAdvance(text) + 4, fm.height(),
                         Qt.AlignLeft | Qt.AlignVCenter, text)
@@ -302,13 +331,13 @@ class MeltChart(QWidget):
         qp = QPainter(self)
         qp.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
-        qp.fillRect(0, 0, w, h, QColor("white"))
+        qp.fillRect(0, 0, w, h, QColor(_CHART_CUR["bg"]))
         pad_l, pad_r, pad_t, pad_b = (self._pad_l, self._pad_r,
                                       self._pad_t, self._pad_b)
         plot_w, plot_h = w - pad_l - pad_r, h - pad_t - pad_b
 
         if not self._datasets:
-            qp.setPen(QColor("#999"))
+            qp.setPen(QColor(_CHART_CUR["status_text"]))
             qp.drawText(self.rect(), Qt.AlignCenter, self._status or "no data")
             return
 
@@ -331,7 +360,7 @@ class MeltChart(QWidget):
             a = amp_start(side, cl)
             if amp > 0:
                 qp.setPen(Qt.NoPen)
-                qp.setBrush(QColor("#f7fafd"))
+                qp.setBrush(QColor(_CHART_CUR["amplicon_band"]))
                 x0 = self._x(a, plot_w)
                 x1 = self._x(a + amp, plot_w)
                 qp.drawRect(int(x0), int(pad_t), int(max(x1 - x0, 2)),
@@ -339,12 +368,12 @@ class MeltChart(QWidget):
             if cl and side in ("5'", "3'"):
                 ca = 0 if side == "5'" else amp
                 qp.setPen(Qt.NoPen)
-                qp.setBrush(QColor("#efeceb"))
+                qp.setBrush(QColor(_CHART_CUR["clamp_fill"]))
                 x0 = self._x(ca, plot_w)
                 x1 = self._x(ca + cl, plot_w)
                 qp.drawRect(int(x0), int(pad_t), int(max(x1 - x0, 2)),
                             int(plot_h))
-                qp.setPen(QColor("#b6a9a4"))
+                qp.setPen(QColor(_CHART_CUR["clamp_text"]))
                 qp.setFont(QFont("Helvetica", 7, QFont.Bold))
                 qp.drawText(int((x0 + x1) / 2 - 46), int(pad_t + 5), 92, 12,
                             Qt.AlignHCenter, f"GC clamp {side}")
@@ -380,13 +409,13 @@ class MeltChart(QWidget):
             if t < self._data_y0 or t > self._data_y1:
                 continue
             y = self._y(t, plot_h)
-            qp.setPen(QColor("#e4e4e4"))
+            qp.setPen(QColor(_CHART_CUR["grid"]))
             qp.drawLine(int(pad_l), int(y), int(w - pad_r), int(y))
-            qp.setPen(QColor("#888"))
+            qp.setPen(QColor(_CHART_CUR["axis_text"]))
             qp.drawText(int(pad_l - 46), int(y - 7), 42, 14,
                         Qt.AlignRight | Qt.AlignVCenter, f"{t:g} °C")
 
-        qp.setPen(QColor("#a8a8a8"))
+        qp.setPen(QColor(_CHART_CUR["axis_line"]))
         qp.drawLine(int(pad_l), int(pad_t), int(pad_l),
                     int(pad_t + plot_h))
         qp.drawLine(int(pad_l), int(pad_t + plot_h),
@@ -398,13 +427,13 @@ class MeltChart(QWidget):
             x = self._x(b, plot_w)
             if not (pad_l - 1 <= x <= w - pad_r + 1):
                 continue
-            qp.setPen(QColor("#cfcfcf"))
+            qp.setPen(QColor(_CHART_CUR["tick"]))
             qp.drawLine(int(x), int(pad_t + plot_h),
                         int(x), int(pad_t + plot_h + 3))
-            qp.setPen(QColor("#777"))
+            qp.setPen(QColor(_CHART_CUR["tick_text"]))
             qp.drawText(int(x - 14), int(pad_t + plot_h + 2), 28, 12,
                         Qt.AlignHCenter, str(b + 1))
-        qp.setPen(QColor("#999"))
+        qp.setPen(QColor(_CHART_CUR["hint"]))
         qp.drawText(int(w - pad_r - 240), h - 13, 240, 12,
                     Qt.AlignRight,
                     "drag box zoom · shift/mid-drag pan · wheel/± zoom · "
@@ -423,8 +452,8 @@ class MeltChart(QWidget):
         y2 = min(r.bottom(), self._pad_t + plot_h)
         if x2 - x < 1 or y2 - y < 1:
             return
-        qp.setBrush(QColor(90, 160, 220, 55))
-        qp.setPen(QPen(QColor(50, 120, 190), 1.2))
+        qp.setBrush(QColor(_CHART_CUR["rubber_fill"]))
+        qp.setPen(QPen(QColor(_CHART_CUR["rubber_border"]), 1.2))
         qp.drawRect(int(x), int(y), int(x2 - x), int(y2 - y))
 
     # ---------------------------------------------------------- interactions - #

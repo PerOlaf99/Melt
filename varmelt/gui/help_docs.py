@@ -1,14 +1,18 @@
-"""User-facing Help text for the varmelt GUI (CTCE fragment design).
+"""User-facing Help text for the MeltScope GUI (CTCE fragment design).
 
 Shown from Help → User manual.  Keep wording practical for wet-lab users
 designing amplicons for cycling temperature capillary electrophoresis.
 """
 
-MANUAL_TITLE = "varmelt — User manual"
+MANUAL_TITLE = "MeltScope — User manual"
 
 MANUAL_HTML = """
 <html><body style="font-family: sans-serif; font-size: 12px;">
-<h2>varmelt melt — User manual</h2>
+<h2>MeltScope — User manual</h2>
+<p style="color:#666; font-size:11px;">
+Variant melting profile design &mdash; PCR primer design + predicted melt maps
+for <b>CTCE</b> (cycling temperature capillary electrophoresis) assays.
+</p>
 <p>
 This application designs PCR fragments and predicts <b>variant melting profiles</b>
 for <b>CTCE</b> (cycling temperature capillary electrophoresis) and related
@@ -71,8 +75,9 @@ trace analysis tool (e.g. Limoncello Scorer); this GUI focuses on fragment desig
 
 ABOUT_HTML = """
 <html><body style="font-family: sans-serif;">
-<h3>varmelt melt</h3>
-<p>Variant melting profile design for CTCE-class assays.</p>
+<h3>MeltScope</h3>
+<p>Variant melting profile design for <b>CTCE</b> (cycling temperature
+capillary electrophoresis) class assays.</p>
 <p>Standalone Python re-implementation of the Variant Melting Profile
 concept (see project README).</p>
 </body></html>

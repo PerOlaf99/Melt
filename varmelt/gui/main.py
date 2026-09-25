@@ -1,4 +1,4 @@
-"""Main window of the standalone varmelt GUI (WinMelt-style workbench)."""
+"""Main window of the standalone MeltScope GUI (WinMelt-style workbench)."""
 import os
 import sys
 
@@ -9,14 +9,75 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox,
                                QHBoxLayout, QInputDialog, QLabel, QListWidget,
                                QListWidgetItem, QMainWindow, QMenu,
                                QMessageBox, QPushButton, QSizePolicy,
-                               QSplitter, QTableWidget, QTableWidgetItem,
+                               QSplitter, QTableWidget,
                                QVBoxLayout, QWidget)
 
 from .. import cli, webapp
+from .design import SortableItem
 from .dialogs import AddPairDialog, AddSequenceDialog, EditItemDialog
 from .model import CLAMP_SIDES, Item, Project
-from .plot import MeltChart, PALETTE
+from .plot import MeltChart, PALETTE, set_chart_theme
 from . import help_docs
+
+# ------------------------------------------------------------------ theme - #
+# Modern 2026 dark "carbon + violet" skin.  Applied as a QSS stylesheet in
+# build_app() so both the window and every dialog share it.
+DARK_QSS = """
+* { font-family: "Segoe UI", "Noto Sans", "DejaVu Sans", sans-serif; }
+QMainWindow, QDialog { background-color: #0f1115; }
+QWidget { background-color: #0f1115; color: #e6e9f0;
+          selection-background-color: #7c6cf0; selection-color: #ffffff; }
+QToolTip { background-color: #1c212b; color: #dfe4ee;
+           border: 1px solid #3a4353; padding: 4px 8px; }
+QMenuBar { background-color: #151922; color: #c9d1e0; border-bottom: 1px solid #252b36; }
+QMenuBar::item:selected { background-color: #232b38; border-radius: 4px; }
+QMenu { background-color: #161a22; color: #e6e9f0; border: 1px solid #2a3140;
+        border-radius: 6px; padding: 4px; }
+QMenu::item { padding: 5px 24px 5px 18px; border-radius: 4px; }
+QMenu::item:selected { background-color: #7c6cf0; color: #ffffff; }
+QMenu::separator { height: 1px; background: #2a3140; margin: 4px 10px; }
+QPushButton { background-color: #232b38; color: #e6e9f0; border: 1px solid #313a4b;
+              border-radius: 6px; padding: 5px 12px; }
+QPushButton:hover { background-color: #2c3547; }
+QPushButton:pressed { background-color: #1c212b; }
+QPushButton:default { background-color: #7c6cf0; border: 1px solid #8f82f5; color: #ffffff; }
+QPushButton:disabled { background-color: #1a1f29; color: #5a6475; }
+QFrame#card, QGroupBox { background-color: #151a23; border: 1px solid #252c3a;
+                         border-radius: 8px; }
+QGroupBox { margin-top: 10px; padding-top: 8px; }
+QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #a7b0c2; }
+QLabel { background-color: transparent; color: #e6e9f0; }
+QLabel#muted { color: #8a94a6; }
+QListWidget, QTableWidget, QTableView, QPlainTextEdit, QTextEdit, QTextBrowser,
+QSpinBox, QDoubleSpinBox, QComboBox {
+    background-color: #12161f; color: #e6e9f0; border: 1px solid #2a3140;
+    border-radius: 6px; selection-background-color: #3a3d5c;
+    alternate-background-color: #141927; }
+QTableWidget::item:selected, QListWidget::item:selected,
+QTableView::item:selected { background-color: #3a3d5c; color: #ffffff; }
+QHeaderView::section { background-color: #1c212b; color: #a7b0c2; border: none;
+                       border-bottom: 1px solid #2a3140; padding: 6px; }
+QHeaderView::section:hover { background-color: #232b38; color: #ffffff; }
+QSpinBox, QDoubleSpinBox, QComboBox { padding: 2px 6px; }
+QComboBox QAbstractItemView { background-color: #161a22; color: #e6e9f0;
+                              selection-background-color: #7c6cf0; }
+QScrollBar:vertical { background: #0f1115; width: 12px; margin: 0; }
+QScrollBar::handle:vertical { background: #2a3140; border-radius: 6px; min-height: 30px; }
+QScrollBar::handle:vertical:hover { background: #3a4659; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QScrollBar:horizontal { background: #0f1115; height: 12px; margin: 0; }
+QScrollBar::handle:horizontal { background: #2a3140; border-radius: 6px; min-width: 30px; }
+QScrollBar::handle:horizontal:hover { background: #3a4659; }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+QCheckBox, QRadioButton { background: transparent; color: #e6e9f0; }
+QCheckBox::indicator, QRadioButton::indicator { width: 14px; height: 14px; }
+"""
+
+
+def apply_dark_theme(app):
+    """Modern carbon+violet dark skin for the whole MeltScope app."""
+    app.setStyleSheet(DARK_QSS)
+    set_chart_theme("dark")
 
 _SUPPORTED = [("varmelt project (*.varmelt.json)", "*.varmelt.json"),
               ("JSON files (*.json)", "*.json")]
@@ -40,7 +101,7 @@ class MainWindow(QMainWindow):
         self._debounce.setInterval(400)
         self._debounce.timeout.connect(self._recompute_current)
 
-        self.setWindowTitle("varmelt melt")
+        self.setWindowTitle("MeltScope — CTCE variant melting design")
         self.resize(1150, 720)
         self._build_ui()
         self._build_menus()
@@ -118,6 +179,10 @@ class MainWindow(QMainWindow):
         top = QHBoxLayout()
         top.addWidget(QLabel("Na+ (mol/L):"))
         self.na_spin = QDoubleSpinBox()
+        self.na_spin.setToolTip(
+            "Monovalent salt (Na+) concentration in mol/L used by the "
+            "two-state melting model. 0.05 = 50 mM. Higher salt stabilises "
+            "the duplex and shifts Tm up; the melt map recomputes live.")
         self.na_spin.setRange(0.001, 1.0)
         self.na_spin.setDecimals(3)
         self.na_spin.setSingleStep(0.001)
@@ -128,6 +193,10 @@ class MainWindow(QMainWindow):
         top.addSpacing(18)
         top.addWidget(QLabel("GC clamp (selected):"))
         self.clamp_combo = QComboBox()
+        self.clamp_combo.setToolTip(
+            "Optional GC-clamp oligo (42 nt) appended to one primer to make "
+            "the melting slope steep and easy to call in CTCE/HRM. Choose "
+            "'none' to see the raw amplicon melt map.")
         for s in CLAMP_SIDES:
             self.clamp_combo.addItem(
                 "5' (left)" if s == "5'" else "3' (right)" if s == "3'"
@@ -186,6 +255,29 @@ class MainWindow(QMainWindow):
             ["Amplicon", "Forward primer", "Reverse primer", "Fwd Tm",
              "Rev Tm", "Product start", "Product end", "Length (bp)",
              "Mean Tm", "Δarea (°C·bp)", "GC clamp", "Melting shape"])
+        self.table.setToolTip(
+            "First/last 20 bases of each predicted primer. Edit manually, "
+            "then Copy or Save CSV for your oligo order.")
+        _HDR_TIPS = {
+            "Fwd Tm": "Predicted melting temperature (°C) of the forward "
+                      "primer (WinMelt model, no GC clamp).",
+            "Rev Tm": "Predicted melting temperature (°C) of the reverse "
+                      "primer (WinMelt model, no GC clamp).",
+            "Mean Tm": "Average local melting temperature (°C) over the "
+                       "fragment; useful for quick Tm comparison.",
+            "Δarea (°C·bp)": "Area between the reference and variant melt "
+                             "curves. Larger = easier to distinguish the "
+                             "alleles in CTCE/HRM.",
+            "GC clamp": "Which end the optional 42-nt GC clamp oligo is "
+                        "attached to ('5''/'3'' or none).",
+            "Melting shape": "Qualitative shape of the melt map after the "
+                             "clamp (e.g. clean slope), as used for "
+                             "CTCE-oriented design scoring.",
+        }
+        for i in range(self.table.columnCount()):
+            col = self.table.horizontalHeaderItem(i)
+            if col and col.text() in _HDR_TIPS:
+                col.setToolTip(_HDR_TIPS[col.text()])
         self.table.verticalHeader().setVisible(False)
         self.table.setMinimumHeight(140)
         self.table.setMaximumHeight(260)
@@ -199,6 +291,8 @@ class MainWindow(QMainWindow):
         for c in (1, 2):
             head.setSectionResizeMode(c, QHeaderView.Stretch)
         head.setMinimumSectionSize(70)
+        head.setSortIndicatorShown(True)
+        self.table.setSortingEnabled(True)
         rlay.addWidget(self.table)
 
         splitter.addWidget(right)
@@ -207,19 +301,28 @@ class MainWindow(QMainWindow):
 
     def _build_menus(self):
         m_file = self.menuBar().addMenu("&File")
-        self._add_action(m_file, "&New", self._new_project, "Ctrl+N")
-        self._add_action(m_file, "&Open…", self._open_project, "Ctrl+O")
-        self._add_action(m_file, "&Save", self._save_project, "Ctrl+S")
-        self._add_action(m_file, "Save &As…", self._save_as, "Ctrl+Shift+S")
+        self._add_action(m_file, "&New", self._new_project, "Ctrl+N",
+                         "Start a fresh project (clears the amplicon list)")
+        self._add_action(m_file, "&Open…", self._open_project, "Ctrl+O",
+                         "Open a saved MeltScope project (*.varmelt.json)")
+        self._add_action(m_file, "&Save", self._save_project, "Ctrl+S",
+                         "Save this project")
+        self._add_action(m_file, "Save &As…", self._save_as, "Ctrl+Shift+S",
+                         "Save this project under a new name")
         m_file.addSeparator()
-        self._add_action(m_file, "Export chart image…", self._export_png)
-        self._add_action(m_file, "Export primers (CSV)…", self._export_csv)
+        self._add_action(m_file, "Export chart image…", self._export_png,
+                         tip="Save the current melt-map chart as a PNG image")
+        self._add_action(m_file, "Export primers (CSV)…", self._export_csv,
+                         tip="Save the primer-set table as a CSV file")
         m_file.addSeparator()
-        self._add_action(m_file, "&Quit", self.close, "Ctrl+Q")
+        self._add_action(m_file, "&Quit", self.close, "Ctrl+Q",
+                         "Close MeltScope")
 
         m_des = self.menuBar().addMenu("&Design")
         self._add_action(m_des, "Fragment design…", self._open_design,
-                         "Ctrl+D")
+                         "Ctrl+D",
+                         "Design candidate fragments for an rsID or genomic "
+                         "position (variant melting profile design)")
 
         m_exp = self.menuBar().addMenu("&Examples")
         self._add_action(m_exp, "BRAF 127 bp flat vs sloped",
@@ -230,14 +333,19 @@ class MainWindow(QMainWindow):
                          self._load_example_braf_silent)
 
         m_help = self.menuBar().addMenu("&Help")
-        self._add_action(m_help, "&User manual…", self._user_manual, "F1")
-        self._add_action(m_help, "&About", self._about)
+        self._add_action(m_help, "&User manual…", self._user_manual, "F1",
+                         "Open the MeltScope user manual (F1)")
+        self._add_action(m_help, "&About", self._about,
+                         tip="About MeltScope — CTCE variant melting design")
 
-    def _add_action(self, menu: QMenu, text, slot, shortcut=None):
+    def _add_action(self, menu: QMenu, text, slot, shortcut=None, tip=None):
         act = QAction(text, self)
         act.triggered.connect(slot)
         if shortcut:
             act.setShortcut(shortcut)
+        if tip:
+            act.setToolTip(tip)
+            act.setStatusTip(tip)
         menu.addAction(act)
 
     # ------------------------------------------------------------ actions - #
@@ -246,7 +354,7 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             items = dlg.items()
             if not items:
-                QMessageBox.warning(self, "varmelt melt",
+                QMessageBox.warning(self, "MeltScope",
                                     "No usable sequence given.")
                 return
             for it in items:
@@ -259,7 +367,7 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             it = dlg.item()
             if not it.wt.strip() or not it.mut.strip():
-                QMessageBox.warning(self, "varmelt melt",
+                QMessageBox.warning(self, "MeltScope",
                                     "Both wildtype and mutant need a "
                                     "sequence.")
                 return
@@ -328,7 +436,7 @@ class MainWindow(QMainWindow):
         if bad:
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.warning(
-                self, "varmelt melt",
+                self, "MeltScope",
                 "Could not add these designed fragments:\n\n"
                 + "\n".join(f"- {b}" for b in bad))
 
@@ -341,7 +449,7 @@ class MainWindow(QMainWindow):
         if it.error:
             if not quiet:
                 from PySide6.QtWidgets import QMessageBox
-                QMessageBox.warning(self, "varmelt melt",
+                QMessageBox.warning(self, "MeltScope",
                                     f"{cand.name}:\n{it.error}")
             return cand.name
         self.project.add(it)
@@ -368,7 +476,7 @@ class MainWindow(QMainWindow):
         try:
             return cli._normalise_pasted_dna(text)
         except ValueError as exc:
-            QMessageBox.warning(self, "varmelt melt", str(exc))
+            QMessageBox.warning(self, "MeltScope", str(exc))
             raise
 
     def _edit_item(self):
@@ -430,7 +538,7 @@ class MainWindow(QMainWindow):
                     it.wt, it.mut = it.wt or it.seq, seq
                     it.seq = ""
         except ValueError as exc:
-            QMessageBox.warning(self, "varmelt melt", str(exc))
+            QMessageBox.warning(self, "MeltScope", str(exc))
             return False
         name = dlg.sequences()[0]
         if name:
@@ -544,7 +652,7 @@ class MainWindow(QMainWindow):
             self.project.save(self.path)
             self.statusBar().showMessage(f"saved {self.path}", 3000)
         except OSError as exc:
-            QMessageBox.critical(self, "varmelt melt", str(exc))
+            QMessageBox.critical(self, "MeltScope", str(exc))
 
     def _save_as(self):
         p = self._selected_file(save=True)
@@ -567,7 +675,7 @@ class MainWindow(QMainWindow):
         try:
             self.project = Project.load(p)
         except Exception as exc:                            # noqa: BLE001
-            QMessageBox.critical(self, "varmelt melt",
+            QMessageBox.critical(self, "MeltScope",
                                  f"cannot open {p}:\n{exc}")
             return
         self.path = p
@@ -587,7 +695,7 @@ class MainWindow(QMainWindow):
         visible = [it for it in self.project.items
                    if it.plot and it.result and not it.error]
         if not visible:
-            QMessageBox.warning(self, "varmelt melt",
+            QMessageBox.warning(self, "MeltScope",
                                 "tick an amplicon to plot first")
             return
         p, _ = QFileDialog.getSaveFileName(
@@ -603,7 +711,7 @@ class MainWindow(QMainWindow):
 
     def _export_csv(self):
         if not self.project.items:
-            QMessageBox.warning(self, "varmelt melt", "nothing to export")
+            QMessageBox.warning(self, "MeltScope", "nothing to export")
             return
         p, _ = QFileDialog.getSaveFileName(self, "Export primers CSV",
                                            "primers.csv",
@@ -623,7 +731,7 @@ class MainWindow(QMainWindow):
                         w.writerow(row)
             self.statusBar().showMessage(f"primers saved {p}", 3000)
         except OSError as exc:
-            QMessageBox.critical(self, "varmelt melt", str(exc))
+            QMessageBox.critical(self, "MeltScope", str(exc))
 
     def _csv_row(self, it: Item):
         if it.error or not it.result:
@@ -707,7 +815,7 @@ class MainWindow(QMainWindow):
 
     def _copy_table(self):
         if not self.table.rowCount():
-            QMessageBox.information(self, "varmelt melt", "nothing to copy")
+            QMessageBox.information(self, "MeltScope", "nothing to copy")
             return None
         lines = []
         lines.append("\t".join(
@@ -824,10 +932,13 @@ class MainWindow(QMainWindow):
 
     def _render_table(self):
         """Primer-set table: one row per computed amplicon (so every added
-        sequence shows up, not just the selected one)."""
+        sequence shows up, not just the selected one).  Numeric columns sort
+        by value (click a column header, like the design dialog)."""
         rows = [it for it in self.project.items
                 if it.result and not it.error]
+        self.table.setSortingEnabled(False)
         self.table.setRowCount(len(rows))
+        numeric_cols = {3, 4, 5, 6, 7, 8, 9}   # Tm, start/end, length, Δarea
         for r, it in enumerate(rows):
             pair = it.pair()
             res = it.result
@@ -854,7 +965,14 @@ class MainWindow(QMainWindow):
                          res.get("clamp", "none"),
                          res.get("melting_shape") or "single strand"]
             for c, val in enumerate(cols):
-                self.table.setItem(r, c, QTableWidgetItem(str(val)))
+                item = SortableItem(str(val))
+                if c in numeric_cols and val not in (None, ""):
+                    try:
+                        item.setData(Qt.UserRole, float(val))
+                    except (TypeError, ValueError):
+                        pass
+                self.table.setItem(r, c, item)
+        self.table.setSortingEnabled(True)
 
     def _user_manual(self):
         """Show the built-in HTML user manual (Help → User manual / F1)."""
@@ -873,8 +991,8 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def _about(self):
-        QMessageBox.about(self, "varmelt melt",
-                          "Standalone WinMelt-style melting-profile "
+        QMessageBox.about(self, "MeltScope",
+                          "MeltScope — WinMelt-style melting-profile "
                           "workbench.\n\nPaste any DNA fragment (or "
                           "wildtype/mutant pair), add a GC clamp, adjust "
                           "the salt, and inspect the per-base melt map and "
@@ -885,7 +1003,7 @@ class MainWindow(QMainWindow):
 
     def _update_title(self):
         base = os.path.basename(self.path) if self.path else "untitled"
-        self.setWindowTitle(f"varmelt melt — {base}")
+        self.setWindowTitle(f"MeltScope — CTCE variant melting design — {base}")
 
     def closeEvent(self, event):                    # noqa: N802
         self._debounce.stop()
@@ -894,6 +1012,7 @@ class MainWindow(QMainWindow):
 
 def build_app(argv=None, project_path=None):
     app = QApplication(argv if argv is not None else sys.argv)
+    apply_dark_theme(app)
     win = MainWindow()
     if project_path:
         win._open_path(project_path)

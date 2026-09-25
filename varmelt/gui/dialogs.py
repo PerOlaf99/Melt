@@ -1,4 +1,4 @@
-"""Input dialogs for the varmelt GUI: paste sequences / wt-mut pairs."""
+"""Input dialogs for the MeltScope GUI: paste sequences / wt-mut pairs."""
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QFormLayout,
                                QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit,

@@ -1,4 +1,4 @@
-"""Project model for the varmelt GUI.
+"""Project model for the MeltScope GUI.
 
 A :class:`Project` holds the settings (Na+) and a list of :class:`Item`
 records describing pasted amplicons.  Each item is either a bare stranded
@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from .. import cli
 from .. import primers as pr
 
-APP_NAME = "varmelt melt"
+APP_NAME = "MeltScope"
 SCHEMA_VERSION = 1
 CLAMP_SIDES = ["5'", "3'", "none"]
 

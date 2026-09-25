@@ -42,18 +42,25 @@ def _chrom_sort_key(chrom: str):
     return (2, 0, low)
 
 
+def _sort_rank(item):
+    """Stable sort key for a table cell: numeric UserRole beats text.
+
+    Never delegate to ``QTableWidgetItem.__lt__``: PySide6 re-dispatches it
+    into the Python override and recurses forever."""
+    if item is None:
+        return (2, 0, "")
+    d = item.data(Qt.UserRole)
+    if d is None or isinstance(d, str):
+        txt = d if isinstance(d, str) else item.text()
+        return (0, 0, txt.casefold())
+    return (1, d)
+
+
 class SortableItem(QTableWidgetItem):
     """QTableWidgetItem that sorts by Qt.UserRole when set (numeric / tuple)."""
 
     def __lt__(self, other: QTableWidgetItem) -> bool:
-        a = self.data(Qt.UserRole)
-        b = other.data(Qt.UserRole) if other is not None else None
-        if a is not None and b is not None:
-            try:
-                return a < b
-            except TypeError:
-                pass
-        return super().__lt__(other)
+        return _sort_rank(self) < _sort_rank(other)
 
 
 def _run_design_sync(specs, base, progress=None):

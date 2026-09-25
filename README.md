@@ -1,4 +1,4 @@
-# Variant melting profiles
+# MeltScope — Variant melting profiles
 
 A standalone, modern-Python re-implementation of the *Variant Melting
 Profile* concept of the Genomic HyperBrowser suite (Ekstrøm, Nakken, Johansen
