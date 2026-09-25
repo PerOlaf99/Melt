@@ -114,6 +114,35 @@ def test_project_schema():
     ok(Project.from_dict(d).na == 0.05, "na stored in schema")
 
 
+def test_dialogs_and_filter_string():
+    from varmelt.gui.dialogs import (AddPairDialog, AddSequenceDialog,
+                                     CLAMP_SIDES)
+    from varmelt.gui.main import MainWindow, _file_filters
+
+    app = QApplication.instance() or QApplication([])
+    win = MainWindow()                       # no default-clamp mixup
+    dlg = AddSequenceDialog(win)
+    ok(dlg.clamp_row.value() in CLAMP_SIDES,
+       "sequence dialog default clamp is a valid side")
+    new = AddSequenceDialog(win)
+    new.seq_edit.setPlainText(">a\n" + SEQ + "\n>b_wt\n" + SEQ +
+                              "\n>b_mut\n" + MUT)
+    items = new.items()
+    ok(len(items) == 2, "dialog parses seq + wt/mut pair")
+    ok(items[0].kind == "seq" and items[1].kind == "pair",
+       "dialog yields seq and pair items")
+
+    dlg2 = AddPairDialog(win)
+    dlg2.wt_edit.setPlainText(SEQ)
+    dlg2.mut_edit.setPlainText(MUT)
+    it = dlg2.item()
+    ok(it.wt == SEQ and it.mut == MUT, "pair dialog captures strings")
+
+    f = _file_filters()
+    ok("varmelt project (*.varmelt.json)" in f and ";;" in f,
+       "file filters build a valid string")
+
+
 if __name__ == "__main__":
     test_model_compute_roundtrip()
     test_project_schema()

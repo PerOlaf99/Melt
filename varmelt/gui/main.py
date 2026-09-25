@@ -22,6 +22,11 @@ _CSV_HEAD = ["name", "kind", "forward primer", "reverse primer",
              "length", "mean tm", "gc clamp", "melting shape"]
 
 
+def _file_filters() -> str:
+    return ";;".join(f"{name} ({pattern})"
+                     for name, pattern in _SUPPORTED)
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -140,7 +145,7 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------ actions - #
     def _add_sequence(self):
-        dlg = AddSequenceDialog(self, self.project.na)
+        dlg = AddSequenceDialog(self)
         if dlg.exec():
             items = dlg.items()
             if not items:
@@ -153,7 +158,7 @@ class MainWindow(QMainWindow):
             self._select_index(len(self.project.items) - 1)
 
     def _add_pair(self):
-        dlg = AddPairDialog(self, self.project.na)
+        dlg = AddPairDialog(self)
         if dlg.exec():
             it = dlg.item()
             if not it.wt.strip() or not it.mut.strip():
@@ -198,9 +203,11 @@ class MainWindow(QMainWindow):
                                .replace(".json", ".varmelt.json"))
         if save:
             return QFileDialog.getSaveFileName(self, "Save project", default,
-                                               ";;".join(_SUPPORTED))[0]
-        return QFileDialog.getOpenFileName(self, "Open project", "",
-                                           ";;".join(_SUPPORTED))[0]
+                                               _file_filters())[0]
+        return QFileDialog.getOpenFileName(self, "Open project",
+                                           os.path.dirname(default)
+                                           or os.getcwd(),
+                                           _file_filters())[0]
 
     def _save_project(self):
         if not self.path:
