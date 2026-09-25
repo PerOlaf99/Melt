@@ -8,6 +8,11 @@ starts at base 43, while a ``3'`` clamp sits after the amplicon.  Every
 dataset is numbered from its own base 1 which is always the left edge of
 the plot.
 
+For a wildtype/mutant pair the two GC clamps are the *same* oligo, so with
+a ``3'`` clamp the mutant is right-anchored: its clamp is drawn directly
+under the wildtype clamp (and the delta band only compares amplicon bases)
+so a deletion/insertion can never spill phantoms into the grey clamp tail.
+
 Each item gets its own colour (wildtype solid, mutant dashed) and a legend
 shows which line belongs to which amplicon.  There are no primer or
 mutation markers.  The view can be zoomed with the wheel or the +/- /
@@ -70,9 +75,16 @@ class MeltChart(QWidget):
         xs, ys = [], []
         for d in self._datasets:
             ref = d.get("ref_prof") or []
-            # physical fragment: base 1 is the left edge, clamp included
-            xs.append((0, max(len(ref), 1)))
-            for t in list(ref) + list(d.get("alt_prof") or []):
+            alt = d.get("alt_prof") or []
+            # 3' clamps right-anchor the mutant so its GC clamp overlays
+            # the wildtype clamp (see alt_shift); the shorter fragment may
+            # not reach x 0.
+            shift = 0.0
+            if d.get("paired") and alt and d.get("clamp_side") == "3'":
+                shift = float(d.get("alt_shift", 0) or 0)
+            xs.append((min(0.0, shift),
+                       max(len(ref), len(alt) + shift)))
+            for t in list(ref) + list(alt):
                 if t is not None and not math.isnan(t):
                     ys.append(float(t))
         self._data_x0, self._data_x1 = 0.0, max((b for _, b in xs),
@@ -84,6 +96,17 @@ class MeltChart(QWidget):
         pad = (y1 - y0) * 0.08 or 2.0
         self._data_y0, self._data_y1 = y0 - pad, y1 + pad
         self._view_y0, self._view_y1 = self._data_y0, self._data_y1
+
+    @staticmethod
+    def _amp_window(profile_len, clamp_side, clamp_len):
+        """(lo, hi) 0-based index range of the amplicon bases inside a
+        clamped profile; the GC clamp itself is never part of it."""
+        cl = max(0, int(clamp_len))
+        if clamp_side == "5'":
+            return cl, profile_len
+        if clamp_side == "3'":
+            return 0, profile_len - cl
+        return 0, profile_len
 
     @staticmethod
     def substrate_x(d, i):
@@ -177,6 +200,12 @@ class MeltChart(QWidget):
         var = 0 if var is None else int(var)
         indel = int(d.get("indel", 0))
         n_alt = len(alt)
+        # only amplicon-vs-amplicon bases are compared: the GC clamp is the
+        # same oligo on both, so a deletion/insertion must never show up as
+        # phantom differences inside the grey clamp tail
+        cl = max(0, int(d.get("clamp_len", 0)))
+        r_lo, r_hi = self._amp_window(len(ref), d.get("clamp_side"), cl)
+        a_lo, a_hi = self._amp_window(n_alt, d.get("clamp_side"), cl)
         top, bot = [], []
 
         def flush():
@@ -192,8 +221,9 @@ class MeltChart(QWidget):
 
         for i, rt in enumerate(ref):
             j = i if i < var else i - indel
-            if rt is None or math.isnan(rt) \
-                    or not (0 <= j < n_alt) or alt[j] is None \
+            if not (r_lo <= i < r_hi) \
+                    or rt is None or math.isnan(rt) \
+                    or not (a_lo <= j < a_hi) or alt[j] is None \
                     or math.isnan(alt[j]):
                 flush()
                 top, bot = [], []
@@ -281,6 +311,11 @@ class MeltChart(QWidget):
         self._delta_count = 0
         span_x = self._data_x1 - self._data_x0
 
+        # clip every band and curve to the plot box so zoomed/panned views
+        # never let a line cross the axes into the margins
+        qp.save()
+        qp.setClipRect(QRectF(pad_l, pad_t, plot_w, plot_h))
+
         # physical fragment band behind each dataset's amplicon (base 1..N),
         # with the GC clamp drawn as a grey tail at the end that carries it
         for d in self._datasets:
@@ -323,11 +358,16 @@ class MeltChart(QWidget):
             self._draw_polyline(qp, pts, color, 1.6)
             alt = d.get("alt_prof") or []
             if alt and d.get("paired"):
-                pts = [(self._x(self.substrate_x(d, i), plot_w),
+                # right-anchored for 3' clamps: keep the identical GC clamp
+                # glued to the wildtype clamp, so an indel never appears to
+                # extend into the grey clamp tail
+                alt_shift = float(d.get("alt_shift", 0) or 0)
+                pts = [(self._x(self.substrate_x(d, i) + alt_shift, plot_w),
                         self._y(t, plot_h)) for i, t in enumerate(alt)]
                 self._draw_polyline(qp, pts, color, 1.2, dash=True)
+        qp.restore()
 
-        # axes: y grid + labels, x grid labelled with amplicon base numbers
+        # axes: y grid + labels, x grid labelled with physical base numbers
         qp.setFont(QFont("Helvetica", 8))
         step = max(int(math.ceil((self._data_y1 - self._data_y0) / 12)), 5)
         for t in range(int(self._data_y0 // step) * step,

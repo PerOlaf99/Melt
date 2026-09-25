@@ -74,6 +74,11 @@ opens a saved project on start.
   the left edge: a `5'` GC clamp occupies bases 1..42 (grey tail) and the
   amplicon starts at base 43, a `3'` clamp sits after the amplicon.  The
   ruler labels the real bases, grey for clamp bases.
+- For a wildtype/mutant pair the GC clamp is the *same* oligo on both, so
+  with a `3'` clamp the mutant is right-anchored: its clamp is drawn
+  directly under the wildtype clamp, and the delta band only compares
+  amplicon bases — a deletion/insertion never spills phantoms into the
+  grey clamp tail.
 - The GC clamp is *not* part of the primer: the reported primer sequences
   are the bare 20-mers (with a 42-base left clamp the forward primer
   starts at amplicon base 43) and no primer or mutation markers clutter

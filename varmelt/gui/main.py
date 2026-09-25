@@ -408,6 +408,8 @@ class MainWindow(QMainWindow):
                 "clamp_side": fd["clamp_side"],
                 "mark_idx": fd["mark_idx"],
                 "indel": fd["indel"],
+                "alt_shift": (int(fd["indel"]) if fd["clamp_side"] == "3'"
+                              else 0),
                 "delta_area": float(it.result.get("delta_area", 0.0) or 0.0),
                 "dip": bool(str(it.result.get("melting_shape") or "")
                             .startswith("dip")),

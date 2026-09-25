@@ -194,6 +194,40 @@ def test_chart_renders_png():
        "a sub-6 px drag is ignored (no accidental zoom)")
     ch.reset()
 
+    # zoomed/panned curves are clipped to the plot box: no item colour may
+    # appear in the margins, even when a chunk of fragment lies off-screen
+    win.show()
+    app.processEvents()
+    ch._zoom_rect(QRectF(pad_l + plot_w / 4, pad_t + plot_h / 4,
+                         plot_w / 2, plot_h / 2))
+    pm = ch.grab()
+    img = pm.toImage()
+
+    def _hex_rgb(c):
+        return (int(c[1:3], 16), int(c[3:5], 16), int(c[5:7], 16))
+
+    def _near(px, rgb, tol=60):
+        return (abs(px.red() - rgb[0]) <= tol
+                and abs(px.green() - rgb[1]) <= tol
+                and abs(px.blue() - rgb[2]) <= tol)
+
+    rgbs = [_hex_rgb(d["color"]) for d in ch._datasets]
+    leaks = 0
+    for x in range(0, pad_l - 3):
+        for y in range(pad_t, pad_t + plot_h):
+            px = img.pixelColor(x, y)
+            if any(_near(px, c) for c in rgbs):
+                leaks += 1
+    ok(leaks == 0, "zoomed curves never cross the y axis into the left margin")
+    leaks = 0
+    for y in range(pad_t + plot_h + 1, pad_t + plot_h + 10):
+        for x in range(pad_l, ch.width() - pad_r):
+            px = img.pixelColor(x, y)
+            if any(_near(px, c) for c in rgbs):
+                leaks += 1
+    ok(leaks == 0, "zoomed curves never cross the bottom axis into the ruler")
+    win.close()
+
     # the primer table lists every computed fragment, not just the selected
     win._render_table()
     ok(win.table.rowCount() == 2, "primer table row per computed item")
@@ -402,12 +436,67 @@ def test_buttons_and_table():
        "render refreshes primers for the current item")
 
 
+def test_clamp_anchor_indel():
+    from PySide6.QtWidgets import QApplication
+    from varmelt.gui.main import MainWindow
+    from varmelt.gui.model import Item
+    from varmelt.gui.plot import MeltChart
+    from varmelt.primers import GC_CLAMP
+
+    app = QApplication.instance() or QApplication([])
+    win = MainWindow()
+    DEL = SEQ[:40] + SEQ[41:]            # 1-base deletion in the amplicon
+    win.project.add(Item(kind="pair", name="del_5", wt=SEQ, mut=DEL,
+                         clamp="5'"))
+    win.project.add(Item(kind="pair", name="del_3", wt=SEQ, mut=DEL,
+                         clamp="3'"))
+    win.project.add(Item(kind="pair", name="snp_3", wt=SEQ, mut=MUT,
+                         clamp="3'"))
+    win.project.add(Item(kind="pair", name="del_none", wt=SEQ, mut=DEL))
+    for it in win.project.items:
+        it.compute(win.project.na)
+    win._refresh_list()
+    win._render_plots()
+    ch = win.chart
+    datasets = {d["name"]: d for d in ch._datasets}
+
+    d5 = datasets["del_5"]
+    d3 = datasets["del_3"]
+    ok(d5["alt_shift"] == 0,
+       "5' clamp keeps the mutant at physical positions (clamp glued left)")
+    ok(d3["alt_shift"] == 1,
+       "3' clamp right-anchors the mutant by the indel length")
+    ok(datasets["del_none"]["alt_shift"] == 0, "no clamp: no shift")
+    ok(datasets["snp_3"]["alt_shift"] == 0,
+       "3' clamp SNP (indel 0): no shift needed")
+
+    # the shifted mutant still overlays its clamp onto the wildtype clamp
+    ref3 = d3["ref_prof"]
+    alt3 = d3["alt_prof"]
+    cl = len(GC_CLAMP)
+    ok(len(alt3) - cl + d3["alt_shift"] == len(ref3) - cl,
+       "3' clamp: mutant clamp start lands exactly on the wt clamp start")
+    ok(d3["indel"] == len(ref3) - len(alt3), "indel is the length deficit")
+
+    # the delta band only compares amplicon bases on either side
+    ok(ch._amp_window(len(ref3), "3'", cl) == (0, len(ref3) - cl),
+       "3' amplicon window excludes the tail clamp")
+    ok(ch._amp_window(len(alt3), "3'", cl) == (0, len(alt3) - cl),
+       "3' mutant window excludes its tail clamp too")
+    ok(ch._amp_window(len(ref3), "5'", cl) == (cl, len(ref3)),
+       "5' amplicon window excludes the head clamp")
+    ok(ch._amp_window(len(ref3), None, cl) == (0, len(ref3)),
+       "no clamp: whole profile is compared")
+    ok(ch._data_x0 == 0, "a deletion keeps the plot starting at base 1")
+
+
 if __name__ == "__main__":
     test_model_compute_roundtrip()
     test_project_schema()
     test_edit_duplicate_delete()
     test_edit_field_bare_headers()
     test_chart_renders_png()
+    test_clamp_anchor_indel()
     test_buttons_and_table()
     print("\n" + ("ALL GUI TESTS PASSED" if failures == 0
                   else f"{failures} FAILURE(S)"))
