@@ -89,6 +89,59 @@ def test_design_rejects_wrong_ref_and_identical_alleles():
         assert False, "alt == ref must fail"
 
 
+def test_window_idx_is_one_based_pos_consistent():
+    """Regression: the genome path must index the window by 1-based pos.
+
+    UCSC windows are 0-based half-open, so 1-based *pos* maps to window
+    index ``pos - 1 - start``.  A one-base error here silently validated the
+    wrong allele and displaced the variant.  A ref that exists only at the
+    *true* index must be accepted and fed to Primer3 as *var_pos*;
+    the same ref read from the neighbouring base must be rejected.
+    """
+    import varmelt.design as dmod
+
+    start = 100
+    seen = {}
+
+    def fake_chrom_start_end(assembly, chrom, window, centre=None,
+                             local_2bit=None):
+        return ("chr7", start, start + 500, 6_000_000)
+
+    def fake_fetch(assembly, chrom, s, e, local_2bit=None):
+        seq = ["T"] * 500
+        true_idx = 101 - 1 - start          # 1-based 101 -> window index 0
+        seq[true_idx] = "A"
+        return "".join(seq)
+
+    def fake_design(seq, **kw):
+        seen.update(kw)
+        return []
+
+    old = (dmod.g.chrom_start_end, dmod.g.fetch_sequence,
+           dmod.pr.design, dmod.pr.design_fallback)
+    dmod.g.chrom_start_end = fake_chrom_start_end
+    dmod.g.fetch_sequence = fake_fetch
+    dmod.pr.design = fake_design
+    dmod.pr.design_fallback = lambda *a, **k: []
+    try:
+        r = dmod.design_variant(chrom="chr7", pos=101, ref="A", alt="G",
+                                genome="hg38", with_dbsnp=False,
+                                max_frag=240, na=0.013)
+        assert seen["var_pos"] == 0, f"A must sit at window index 0, got {seen}"
+        assert r is not None
+        try:
+            dmod.design_variant(chrom="chr7", pos=101, ref="T", alt="G",
+                                genome="hg38", with_dbsnp=False,
+                                max_frag=240, na=0.013)
+        except ValueError as exc:
+            assert "ref allele T does not match" in str(exc), str(exc)
+        else:
+            assert False, "the neighbour base must not be accepted as ref"
+    finally:
+        (dmod.g.chrom_start_end, dmod.g.fetch_sequence,
+         dmod.pr.design, dmod.pr.design_fallback) = old
+
+
 def test_parse_variant_spec():
     from varmelt import design
     for text, want in [

@@ -206,7 +206,10 @@ def design_variant(rsid: Optional[str] = None, chrom: str = "ref",
         refseq = g.fetch_sequence(a, chrom_n, start, end, local_2bit)
         if len(refseq) < window:
             raise ValueError(f"window {window} exceeds chromosome boundary")
-    idx = pos - start
+    if refseq_override is not None:
+        idx = int(pos)                      # 0-based index into supplied window
+    else:
+        idx = pos - 1 - start               # 1-based pos into 0-based window
     if not (0 <= idx < len(refseq)):
         raise ValueError("variant position outside fetched window")
 

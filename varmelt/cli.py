@@ -258,7 +258,7 @@ def analyze(rsid: Optional[str], chrom: str, pos: int, ref: str,
     if len(refseq) < window:
         raise ValueError(f"window {window} exceeds chromosome boundary")
 
-    idx = pos - start
+    idx = pos - 1 - start
     if not (0 <= idx < len(refseq)):
         raise ValueError("variant position outside fetched window")
 
