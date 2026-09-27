@@ -20,64 +20,77 @@ from .plot import MeltChart, PALETTE, set_chart_theme
 from . import help_docs
 
 # ------------------------------------------------------------------ theme - #
-# Modern 2026 dark "carbon + violet" skin.  Applied as a QSS stylesheet in
-# build_app() so both the window and every dialog share it.
-DARK_QSS = """
+# Modern 2026 "LIF green" skin for fluorescence detection (Laser-Induced
+# Fluorescence): crisp white/cream with fluorescent laser-green accents,
+# dark-green text.  Bright and readable, with that lab feel.
+# Applied as a QSS stylesheet in build_app() so the window and dialogs share it.
+LIF_QSS = """
 * { font-family: "Segoe UI", "Noto Sans", "DejaVu Sans", sans-serif; }
-QMainWindow, QDialog { background-color: #0f1115; }
-QWidget { background-color: #0f1115; color: #e6e9f0;
-          selection-background-color: #7c6cf0; selection-color: #ffffff; }
-QToolTip { background-color: #1c212b; color: #dfe4ee;
-           border: 1px solid #3a4353; padding: 4px 8px; }
-QMenuBar { background-color: #151922; color: #c9d1e0; border-bottom: 1px solid #252b36; }
-QMenuBar::item:selected { background-color: #232b38; border-radius: 4px; }
-QMenu { background-color: #161a22; color: #e6e9f0; border: 1px solid #2a3140;
-        border-radius: 6px; padding: 4px; }
+QMainWindow, QDialog { background-color: #eef7e4; }
+QWidget { background-color: #eef7e4; color: #1c3810;
+          selection-background-color: #b0dd82; selection-color: #12280a; }
+QToolTip { background-color: #f8fff0; color: #1c3810;
+           border: 1px solid #6fbf3a; padding: 4px 8px; }
+QMenuBar { background-color: #a3da5f; color: #12280a;
+           border-bottom: 1px solid #7bb854; }
+QMenuBar::item:selected { background-color: #7fd24a; border-radius: 4px;
+                          color: #12280a; }
+QMenu { background-color: #f8fff0; color: #1c3810;
+        border: 1px solid #8cc85c; border-radius: 6px; padding: 4px; }
 QMenu::item { padding: 5px 24px 5px 18px; border-radius: 4px; }
-QMenu::item:selected { background-color: #7c6cf0; color: #ffffff; }
-QMenu::separator { height: 1px; background: #2a3140; margin: 4px 10px; }
-QPushButton { background-color: #232b38; color: #e6e9f0; border: 1px solid #313a4b;
-              border-radius: 6px; padding: 5px 12px; }
-QPushButton:hover { background-color: #2c3547; }
-QPushButton:pressed { background-color: #1c212b; }
-QPushButton:default { background-color: #7c6cf0; border: 1px solid #8f82f5; color: #ffffff; }
-QPushButton:disabled { background-color: #1a1f29; color: #5a6475; }
-QFrame#card, QGroupBox { background-color: #151a23; border: 1px solid #252c3a;
-                         border-radius: 8px; }
+QMenu::item:selected { background-color: #7fd24a; color: #12280a; }
+QMenu::separator { height: 1px; background: #bde29a; margin: 4px 10px; }
+QPushButton { background-color: #9ce055; color: #12280a;
+              border: 1px solid #6db43a; border-radius: 7px; padding: 5px 12px; }
+QPushButton:hover { background-color: #b5e877; }
+QPushButton:pressed { background-color: #7ec23c; }
+QPushButton:default { background-color: #4fc92a; border: 1px solid #3aa81d;
+                      color: #12280a; font-weight: 600; }
+QPushButton:disabled { background-color: #e4f0d8; color: #8aa168; }
+QFrame#card, QGroupBox { background-color: #f7fdf0;
+                         border: 1px solid #b8dd89; border-radius: 9px; }
 QGroupBox { margin-top: 10px; padding-top: 8px; }
-QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #a7b0c2; }
-QLabel { background-color: transparent; color: #e6e9f0; }
-QLabel#muted { color: #8a94a6; }
-QListWidget, QTableWidget, QTableView, QPlainTextEdit, QTextEdit, QTextBrowser,
-QSpinBox, QDoubleSpinBox, QComboBox {
-    background-color: #12161f; color: #e6e9f0; border: 1px solid #2a3140;
-    border-radius: 6px; selection-background-color: #3a3d5c;
-    alternate-background-color: #141927; }
+QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px;
+                   color: #44691f; }
+QLabel { background-color: transparent; color: #1c3810; }
+QLabel#muted { color: #65803d; }
+QListWidget, QTableWidget, QTableView, QPlainTextEdit, QTextEdit,
+QTextBrowser, QSpinBox, QDoubleSpinBox, QComboBox {
+    background-color: #ffffff; color: #1c3810; border: 1px solid #9ad066;
+    border-radius: 7px; selection-background-color: #cdedad;
+    alternate-background-color: #eff9e5; }
 QTableWidget::item:selected, QListWidget::item:selected,
-QTableView::item:selected { background-color: #3a3d5c; color: #ffffff; }
-QHeaderView::section { background-color: #1c212b; color: #a7b0c2; border: none;
-                       border-bottom: 1px solid #2a3140; padding: 6px; }
-QHeaderView::section:hover { background-color: #232b38; color: #ffffff; }
+QTableView::item:selected { background-color: #cdedad; color: #12280a; }
+QHeaderView::section { background-color: #d5eba8; color: #35600e;
+                       border: none; border-bottom: 1px solid #9ad066;
+                       padding: 6px; font-weight: 600; }
+QHeaderView::section:hover { background-color: #9ce055; color: #12280a; }
 QSpinBox, QDoubleSpinBox, QComboBox { padding: 2px 6px; }
-QComboBox QAbstractItemView { background-color: #161a22; color: #e6e9f0;
-                              selection-background-color: #7c6cf0; }
-QScrollBar:vertical { background: #0f1115; width: 12px; margin: 0; }
-QScrollBar::handle:vertical { background: #2a3140; border-radius: 6px; min-height: 30px; }
-QScrollBar::handle:vertical:hover { background: #3a4659; }
+QComboBox QAbstractItemView { background-color: #f8fff0; color: #1c3810;
+                              selection-background-color: #7fd24a;
+                              selection-color: #12280a; }
+QScrollBar:vertical { background: #e4f5d0; width: 12px; margin: 0; }
+QScrollBar::handle:vertical { background: #8acc50; border-radius: 6px;
+                              min-height: 30px; }
+QScrollBar::handle:vertical:hover { background: #67c735; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-QScrollBar:horizontal { background: #0f1115; height: 12px; margin: 0; }
-QScrollBar::handle:horizontal { background: #2a3140; border-radius: 6px; min-width: 30px; }
-QScrollBar::handle:horizontal:hover { background: #3a4659; }
+QScrollBar:horizontal { background: #e4f5d0; height: 12px; margin: 0; }
+QScrollBar::handle:horizontal { background: #8acc50; border-radius: 6px;
+                                min-width: 30px; }
+QScrollBar::handle:horizontal:hover { background: #67c735; }
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
-QCheckBox, QRadioButton { background: transparent; color: #e6e9f0; }
+QCheckBox, QRadioButton { background: transparent; color: #1c3810; }
 QCheckBox::indicator, QRadioButton::indicator { width: 14px; height: 14px; }
+QProgressBar { background-color: #ffffff; border: 1px solid #9ad066;
+               border-radius: 5px; text-align: center; color: #1c3810; }
+QProgressBar::chunk { background-color: #4fc92a; border-radius: 4px; }
 """
 
 
 def apply_dark_theme(app):
-    """Modern carbon+violet dark skin for the whole MeltScope app."""
-    app.setStyleSheet(DARK_QSS)
-    set_chart_theme("dark")
+    """Fluorescent LIF-green skin (Laser-Induced Fluorescence) for MeltScope."""
+    app.setStyleSheet(LIF_QSS)
+    set_chart_theme("light")
 
 _SUPPORTED = [("varmelt project (*.varmelt.json)", "*.varmelt.json"),
               ("JSON files (*.json)", "*.json")]
@@ -427,12 +440,29 @@ class MainWindow(QMainWindow):
     def _add_designed_many(self, cands):
         """Append the best fragment of every designed variant.
 
-        Failures never block the rest: each bad candidate is noted and one
-        summary warning is shown at the end instead of a modal box per item.
+        The batch never blocks on a single failure: each bad candidate is
+        noted and one summary warning is shown at the end.  All rows are
+        attached first and the views refreshed once, so adding many
+        variants at once stays fast.
         """
-        bad = [name for name in
-               (self._add_designed(cand, quiet=True) for cand in cands)
-               if name]
+        added, bad = 0, []
+        for cand in cands:
+            try:
+                it, err = self._make_designed_item(cand)
+                if it is None:
+                    bad.append(f"{cand.name}: {err}")
+                    continue
+                self.project.add(it)
+                added += 1
+            except Exception as exc:                    # noqa: BLE001
+                bad.append(f"{cand.name}: {exc}")
+        if added:
+            self._refresh_list()
+            self._render_plots()
+            self._render_table()
+            self._select_index(len(self.project.items) - 1)
+            self.statusBar().showMessage(
+                f"designed fragments added: {added}", 6000)
         if bad:
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.warning(
@@ -440,17 +470,27 @@ class MainWindow(QMainWindow):
                 "Could not add these designed fragments:\n\n"
                 + "\n".join(f"- {b}" for b in bad))
 
-    def _add_designed(self, cand, quiet: bool = False):
-        """Append a designed candidate to the project as a normal pair item."""
+    def _make_designed_item(self, cand):
+        """Build + compute a pair Item for a designed candidate.
+
+        Returns ``(Item, "")`` on success or ``(None, error text)`` when the
+        candidate cannot be computed; never raises."""
         from .model import Item
         it = Item(kind="pair", name=cand.name, wt=cand.wt_amp,
                   mut=cand.mut_amp, clamp=cand.clamp or "5'")
         it.compute(self.project.na)
         if it.error:
+            return None, it.error
+        return it, ""
+
+    def _add_designed(self, cand, quiet: bool = False):
+        """Append a designed candidate to the project as a normal pair item."""
+        it, err = self._make_designed_item(cand)
+        if it is None:
             if not quiet:
                 from PySide6.QtWidgets import QMessageBox
                 QMessageBox.warning(self, "MeltScope",
-                                    f"{cand.name}:\n{it.error}")
+                                    f"{cand.name}:\n{err}")
             return cand.name
         self.project.add(it)
         self._refresh_list()
@@ -1007,6 +1047,11 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):                    # noqa: N802
         self._debounce.stop()
+        # Let a running design batch finish before the dialog (and its worker
+        # thread) are destroyed -- otherwise Qt aborts the whole process.
+        dlg = getattr(self, "_design_dlg", None)
+        if dlg is not None:
+            dlg.shutdown()
         super().closeEvent(event)
 
 

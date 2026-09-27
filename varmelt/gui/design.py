@@ -19,12 +19,15 @@ SCORE_NOTE = ("Score 0-100: dip-free (45) + resolvable wt/mut difference "
               "(30) + primer Tm in range (10) + short fragment (10) "
               "+ dbSNP-free 3' ends (5).")
 
-SPEC_HINT = ("One variant per line.  Use a dbSNP rsID (coordinates are "
-             "resolved for the chosen build) or a position, e.g.\n"
+SPEC_HINT = ("One variant per line.  Use a dbSNP rsID (human builds only -- "
+             "coordinates are resolved for the chosen build) or a position, "
+             "e.g.\n"
              "    rs113488022\n"
              "    chr16:30391275 T>C      (chrom:position ref>mutant)\n"
              "    chr7:140453136 G>A     run 2+ lines for a batch.\n"
-             "Commas, blank lines or a lost newline (…T>Cchr12:…) are ok.")
+             "Commas, blank lines or a lost newline (…T>Cchr12:…) are ok.\n"
+             "Any build UCSC hosts works (hg38, mm39, rn6, danRer11, …) -- "
+             "give coordinates in the build you select.")
 
 
 
@@ -63,18 +66,38 @@ class SortableItem(QTableWidgetItem):
         return _sort_rank(self) < _sort_rank(other)
 
 
-def _run_design_sync(specs, base, progress=None):
+def _run_design_sync(specs, base, progress=None, stop=None):
     """Design every spec and return (candidates, per-spec errors).
 
     Runs on the worker thread; a failing variant never kills the rest.
     *progress* is an optional ``callable(i, n)`` invoked after each variant.
+    *stop* is an optional ``callable()`` returning True when the user closed
+    the dialog: the batch then stops after the current variant instead of
+    keeping the process alive for the rest of the list.
+
+    Per-variant genome build (if present in *spec*) overrides the dialog-wide
+    build from *base*.  The effective genome is attached to each candidate so
+    the UI can display it.
     """
     from .. import design
     out, errors = [], []
     n = len(specs)
     for i, spec in enumerate(specs, 1):
+        if stop is not None and stop():
+            errors.append("stopped: dialog closed before the batch finished")
+            break
+        # Determine genome: per-variant spec takes precedence over dialog build
+        genome = spec.get("genome", base.get("genome", "hg38"))
+        # Avoid duplicate keyword argument 'genome'
+        spec_kw = {k: v for k, v in spec.items() if k != "genome"}
+        base_kw = {k: v for k, v in base.items() if k != "genome"}
         try:
-            out += design.design_variant(**spec, **base).candidates
+            result = design.design_variant(
+                **spec_kw, genome=genome, **base_kw)
+            # Attach genome to every candidate so the UI can display it
+            for c in result.candidates:
+                c.genome = genome
+            out += result.candidates
         except Exception as exc:                            # noqa: BLE001
             errors.append(f"{design.spec_label(spec)}: {exc}")
         if progress is not None:
@@ -91,11 +114,26 @@ class _DesignThread(QThread):
     def __init__(self, specs, base, parent=None):
         super().__init__(parent)
         self._specs, self._base = specs, base
+        self._stop = False
+
+    def cancel(self):
+        """Ask the batch to stop after the variant in flight."""
+        self._stop = True
+
+    def drop_pending(self):
+        """Forget the remaining variants so the loop ends after this one.
+
+        Used when a variant is stuck in a call we cannot interrupt: emptying
+        the queue lets the worker exit normally instead of being killed, which
+        keeps the interpreter in a sane state.
+        """
+        self._specs = []
 
     def run(self):
         try:
             cands, errors = _run_design_sync(
-                self._specs, self._base, progress=self._emit_progress)
+                self._specs, self._base, progress=self._emit_progress,
+                stop=lambda: self._stop)
             self.done.emit(cands, errors)
         except Exception as exc:                            # noqa: BLE001
             self.failed.emit(str(exc) or exc.__class__.__name__)
@@ -144,10 +182,19 @@ class DesignDialog(QDialog):
         import_row.addStretch(1)
 
         self.genome_combo = QComboBox()
-        self.genome_combo.addItems(["hg38", "hg19"])
+        from ..genome import COMMON_ASSEMBLIES
+        self.genome_combo.addItems(list(COMMON_ASSEMBLIES))
+        self.genome_combo.setEditable(True)          # any UCSC assembly name
+        self.genome_combo.setInsertPolicy(QComboBox.NoInsert)
         self.genome_combo.setToolTip(
-            "coordinates are build-specific: pick the build your "
-            "chrom/position refer to (an rsID is resolved for this build)")
+            "Any assembly the UCSC API hosts, e.g. hg38, mm39, rn6, "
+            "danRer11, sacCer3, ce11, dm6.  Coordinates are build-specific: "
+            "give contig:position in the build selected here.\n"
+            "rsIDs are human-only (hg19/hg38) -- on other builds use "
+            "coordinates.\n"
+            "UCSC hosts no bacterial, viral or plant genomes; for those, use a "
+            "local genome file.")
+        self.genome_combo.setCurrentText("hg38")
         form.addRow("Genome build", self.genome_combo)
         self.na_spin = QDoubleSpinBox()
         self.na_spin.setRange(0.001, 1.0)
@@ -265,12 +312,25 @@ class DesignDialog(QDialog):
                 errors.append(f"entry {no} ({chunk})")
         return specs, errors
 
+    def _genome_name(self) -> str:
+        """The build as typed (the combo is editable, so not a fixed item)."""
+        return self.genome_combo.currentText().strip()
+
     def _base(self) -> dict:
-        return {"genome": self.genome_combo.currentText(),
+        return {"genome": self._genome_name(),
                 "na": self.na_spin.value(),
                 "max_frag": self.maxfrag_spin.value()}
 
     def _on_design(self):
+        from ..dbsnp import is_human_assembly
+        from ..genome import normalise_assembly
+
+        try:
+            genome = normalise_assembly(self._genome_name())
+        except ValueError:
+            self.status.setText('<font color="#a00">type a genome build, '
+                                'e.g. hg38, mm39 or rn6</font>')
+            return
         specs, errors = self._specs()
         if not specs:
             self.status.setText(
@@ -278,7 +338,15 @@ class DesignDialog(QDialog):
                 f'{f" -- bad {", ".join(errors)}" if errors else "..."}'
                 ' (use "rsID" or "chr:position ref>mutant" per line)</font>')
             return
-        self._set_busy(True, f"designing {len(specs)} variant(s) ...")
+        if not is_human_assembly(genome) and any(s.get("rsid") for s in specs):
+            rsids = ", ".join(str(s.get("rsid")) for s in specs
+                              if s.get("rsid"))
+            self.status.setText(
+                f'<font color="#a00">dbSNP rsIDs are human-only -- on '
+                f'{genome} use contig:position coordinates instead '
+                f'({rsids} cannot be resolved)</font>')
+            return
+        self._set_busy(True, f"designing {len(specs)} variant(s) on {genome} ...")
         self._thread = _DesignThread(specs, self._base(), self)
         self._thread.done.connect(self._on_result)
         self._thread.failed.connect(self._on_error)
@@ -317,8 +385,10 @@ class DesignDialog(QDialog):
         self.table.setRowCount(len(cands))
         for row, c in enumerate(cands):
             from .. import design
-            spec = {"rsid": c.rsid or None, "chrom": c.chrom, "pos": c.pos,
-                    "ref": c.ref, "alt": c.alt}
+            spec = {"rsid": c.rsid or None,
+                    "chrom": c.chrom, "pos": c.pos,
+                    "ref": c.ref, "alt": c.alt,
+                    "genome": getattr(c, "genome", None)}
             label = design.spec_label(spec)
             # Display text + UserRole sort keys (numeric / tuple)
             cells = [
@@ -354,6 +424,47 @@ class DesignDialog(QDialog):
     def _on_error(self, message):
         self._set_busy(False, f'<font color="#a00">failed: {message}</font>')
         self._thread = None
+
+    def shutdown(self, wait_ms: int = 5000) -> bool:
+        """Cancel a running batch and wait for the worker to finish.
+
+        Must run before the dialog is destroyed: a ``QThread`` is killed with
+        the process when its parent widget goes away, which aborted MeltScope
+        outright whenever the window was closed during a batch.  Returns True
+        when no work is left running.
+        """
+        thread = self._thread
+        if thread is None:
+            return True
+        # A late done/progress emit must not touch a dialog on its way out.
+        try:
+            thread.done.disconnect()
+            thread.failed.disconnect()
+            thread.progress.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        if not thread.isRunning():
+            self._thread = None
+            return True
+        thread.cancel()                 # stops after the variant in flight
+        if thread.wait(wait_ms):
+            self._thread = None
+            return True
+        # The worker is stuck in a call we cannot interrupt (typically a
+        # network read).  Empty the queue so it can still return on its own.
+        thread.drop_pending()
+        if thread.wait(wait_ms):
+            self._thread = None
+            return True
+        # Still wedged: force it down rather than let Qt abort the process.
+        thread.terminate()
+        thread.wait(2000)
+        self._thread = None
+        return not thread.isRunning()
+
+    def closeEvent(self, event):                    # noqa: N802
+        self.shutdown()
+        super().closeEvent(event)
 
     # ------------------------------------------------------------- add - #
     def _sync_add_btn(self):

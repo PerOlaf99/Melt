@@ -626,9 +626,12 @@ def analyze_sequence_pair(wt: str, mut: str, name: str = "pasted wt/mut pair",
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="varmelt",
         description="Variant melting profile analysis (primer design + "
-                    "duplex melting maps) for hg19/hg38.")
-    parser.add_argument("--rsid", help="dbSNP rsID (e.g. rs12345)")
-    parser.add_argument("--genome", default="hg38", help="hg19 or hg38")
+                    "duplex melting maps) for any assembly the UCSC API "
+                    "hosts (hg38, mm39, rn6, danRer11, sacCer3, ...).")
+    parser.add_argument("--rsid", help="dbSNP rsID (human builds only)")
+    parser.add_argument("--genome", default="hg38",
+                        help="any UCSC assembly, e.g. hg38, mm39, rn6, "
+                             "danRer11, sacCer3, ce11, dm6 (case-sensitive)")
     parser.add_argument("--rsids", help="file with one rsID per line")
     parser.add_argument("--chrom", help="chromosome (when no rsID is used)")
     parser.add_argument("--pos", type=int, help="0-based position")

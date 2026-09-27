@@ -644,7 +644,7 @@ def test_design_dialog_adds_candidate():
     a = mk(0, "chr7:140453136 G>A", 95)
     b = mk(1, "chr16:30391275 T>C", 88)
     seen = {}
-    gd._run_design_sync = lambda specs, base, progress=None: (
+    gd._run_design_sync = lambda specs, base, progress=None, stop=None: (
         seen.update(specs=specs, base=base) or ([a, b], ["chr1:1 A>C: boom"]))
 
     win = MainWindow()
@@ -690,6 +690,54 @@ def test_design_dialog_adds_candidate():
     ok(it.clamp_side() == "3'", "the designed clamp side is honoured")
     ok(len(win.chart._datasets) >= 1, "the fragments are plotted")
     dlg.close()
+
+
+def test_design_shutdown_stops_running_batch():
+    """Closing the dialog mid-batch must stop the worker, not abort.
+
+    A QThread destroyed while still running aborts the whole process, which is
+    what used to happen when the window was closed during a 15-variant batch.
+    """
+    import threading
+    import time
+
+    from PySide6.QtWidgets import QApplication
+    from varmelt.gui import design as gd
+
+    app = QApplication.instance() or QApplication([])
+    seen = {"stopped_at": None, "n": 0}
+
+    def slow_batch(specs, base, progress=None, stop=None):
+        for i, _spec in enumerate(specs, 1):
+            if stop is not None and stop():
+                seen["stopped_at"] = i
+                return [], ["stopped"]
+            seen["n"] = i
+            time.sleep(0.2)              # stand-in for a slow variant
+        return [], []
+
+    real, gd._run_design_sync = gd._run_design_sync, slow_batch
+    try:
+        dlg = gd.DesignDialog()
+        dlg.specs_edit.setPlainText(
+            "\n".join(f"chr{i + 1}:3000 T>C" for i in range(15)))
+        dlg._on_design()
+        thread = dlg._thread
+        ok(thread is not None and thread.isRunning(),
+           "a 15-variant batch starts a worker thread")
+        time.sleep(0.3)                  # let the first variant get going
+        stopped = dlg.shutdown()
+        ok(stopped, "shutdown() reports the worker stopped")
+        ok(not thread.isRunning(), "the worker thread is no longer running")
+        ok(dlg._thread is None, "the dialog drops its thread reference")
+        ok(seen["stopped_at"] is not None,
+           "the worker was told to stop instead of running the whole batch")
+        ok(seen["n"] < 15, "the batch ended early")
+        # A second shutdown must be harmless (close-after-close).
+        ok(dlg.shutdown(), "a second shutdown() is a no-op")
+        dlg.close()
+    finally:
+        gd._run_design_sync = real
 
 
 def test_design_import_list():
@@ -772,6 +820,7 @@ if __name__ == "__main__":
     test_example_menu_braf_v600e_and_toggle()
     test_example_menu_braf_silent_vs_v600e()
     test_design_dialog_adds_candidate()
+    test_design_shutdown_stops_running_batch()
     test_design_import_list()
     test_design_multi_select_add()
     test_buttons_and_table()

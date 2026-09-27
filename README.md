@@ -109,7 +109,11 @@ opens a saved project on start.
   variant per line* — a dbSNP rsID or a compact position
   (``chr:position ref>alt``, e.g. ``chr16:30391275 T>C``) — for the chosen
   genome build; several lines run as a batch and each variant's best
-  fragment can be added at once ("Add best of each variant").  Candidates
+  fragment can be added at once ("Add best of each variant").  A line may
+  carry its **own** build as a trailing token — ``chr16:30391275 T>C mm10``,
+  ``chr16:30391275 T>C genome=rn6`` or ``rs113488022 | danRer11`` — which
+  overrides the dialog-wide build for that variant only, so one batch can
+  mix human, mouse and zebrafish coordinates.  Candidates
   are ranked by a 0-100 score (dip-free, wt/mutant resolvability, primer
   Tm, fragment length, dbSNP) and "Add selected" drops a fragment in as an
   ordinary wildtype/mutant pair.  The build matters: **hg19 is the same
@@ -121,6 +125,12 @@ opens a saved project on start.
   endings auto-detected) and ``.vcf``, recognising CHROM/POS/REF/ALT
   columns, PCGR ``GENOMIC_CHANGE`` columns and columns already in the
   ``chr:pos ref>alt`` shape.
+- A batch can be stopped by closing the dialog: the worker finishes the
+  variant in flight, the queue is dropped, and the status line says the
+  batch was stopped.  Closing the window mid-batch used to abort the whole
+  process (Qt kills a `QThread` that is still running when its parent
+  widget is destroyed) — see
+  [`docs/non-human-genomes.md`](docs/non-human-genomes.md#closing-the-window-during-a-batch).
 
 ## Usage
 
@@ -292,23 +302,23 @@ dynamic-programming module anymore.
 ## Species coverage
 
 The melting core and the primer design are organism-agnostic: they consume a
-DNA string and know nothing about genomes, contigs or species. The *hg19 /
-hg38* restriction is a restriction on how a reference window is **named and
-fetched**, not on the physics.
-
-This has been verified end to end on real sequence from a bacterium, two
-viruses and a plant, with no changes to `varmelt`:
+DNA string and know nothing about genomes, contigs or species. Fragment
+design works on **any assembly the UCSC API hosts** — the build field in the
+Design dialog accepts a typed name, not a fixed list (hg38, mm39, rn6,
+danRer11, sacCer3, ce11, dm6, …), and fragments have been verified on ten
+non-human builds. dbSNP rsIDs stay human-only; on any other build use
+`contig:position` coordinates.
 
 ```bash
 python examples/nonhuman_demo.py
 python -m varmelt.gui /tmp/varmelt_nonhuman_demo.varmelt.json
 ```
 
-Note that the UCSC REST API — the only network sequence source — hosts no
-plant and no bacterial genomes, so reaching those species needs a local
-genome file rather than a longer build list. See
-[`docs/non-human-genomes.md`](docs/non-human-genomes.md) for what is
-human-only today, the measured results, and the recommended way to generalise.
+The UCSC REST API — the only network sequence source — hosts no plant and no
+bacterial genomes, so reaching those species needs a local genome file rather
+than a different build name. See
+[`docs/non-human-genomes.md`](docs/non-human-genomes.md) for the measured
+results and what is left to do.
 
 ## Tests
 

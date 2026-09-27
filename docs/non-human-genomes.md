@@ -1,22 +1,56 @@
 # Non-human genomes
 
-Status: **investigation + working demonstration.** The analysis engine already
-supports any organism; what is missing is a way to *name and fetch* a
-non-human assembly. This document records what was verified, what currently
-blocks other species, and the recommended way forward.
+Status: **the analysis engine supports any organism, and the design dialog now
+accepts any assembly the UCSC API hosts** (verified on ten non-human builds).
+What remains missing is a *local genome file* backend, which is what bacteria,
+viruses and plants need. This document records what was verified, what is
+still human-only, and what is left to do.
 
 ## Summary
 
 - The melting core and the primer design are **organism-agnostic**. They take a
   DNA string and nothing else. No change is needed in `varmelt/reference.py`
   or `varmelt/primers.py` to analyse a bacterium, a virus or a plant.
-- Three things are human-only: a six-entry assembly allowlist, the
-  NCBI/dbSNP variant services, and hardcoded build lists in the two UIs.
+- The fragment-design dialog's build selector is **free text**. Any assembly
+  name works — aliases are resolved, unknown names pass through, and a build
+  UCSC does not host produces an explicit error instead of a bare rejection.
+- Verified end to end: fragments were designed on mm39, rn6, danRer11,
+  galGal6, sacCer3, ce11, dm6, susScr11, canFam6 and bosTau9, including
+  roman-numeral (`chrI`) and letter-number (`chr2L`) contigs.
 - The UCSC REST API — the only network sequence source — hosts **no plant and
-  no bacterial genomes and essentially no viruses**, so widening the allowlist
-  cannot reach the long tail. That needs a local-file path.
-- End-to-end verified on real sequence from a bacterium, two viruses and a
-  plant, with **zero changes to `varmelt`** (see below).
+  no bacterial genomes and essentially no viruses**, so widening the accepted
+  names cannot reach the long tail. That still needs a local-file backend.
+- dbSNP rsIDs remain human-only by nature; on any other build the app runs on
+  coordinates and says so.
+- Non-human batches made the crash-on-close bug below easy to hit, because a
+  network round-trip per variant means a batch of a dozen or more variants
+  reliably outlives the patience of whoever started it.
+
+## Closing the window during a batch
+
+Long batches (a dozen-plus variants, one network round-trip each) used to kill
+the whole application if the window was closed while the batch was still
+running: a `QThread` that is destroyed while it is still executing aborts the
+process, and Qt prints `QThread: Destroyed while thread '' is still running`
+on the way out. It looked like a random crash — nothing to do with the
+close — and it hit hardest on the slower, non-human builds.
+
+`DesignDialog.shutdown()` now runs before the dialog is torn down (from both
+`DesignDialog.closeEvent` and `MainWindow.closeEvent`):
+
+1. the dialog's signals are disconnected, so a late result cannot touch a
+   window that is on its way out;
+2. the worker is asked to stop and is given a few seconds — it checks between
+   variants, so the batch ends after the one in flight;
+3. if a variant is wedged in a call that cannot be interrupted (a stalled
+   network read), the remaining queue is dropped so the worker can still
+   return on its own, and only a thread that is *still* stuck afterwards is
+   terminated.
+
+Closing a 15-variant batch mid-run now exits cleanly, and a partially finished
+batch reports `stopped: dialog closed before the batch finished` rather than
+disappearing. Regression test: `test_design_shutdown_stops_running_batch` in
+`tests/test_gui.py`.
 
 ## What is already organism-agnostic
 
@@ -68,34 +102,49 @@ committed script simply settles on an earlier locus first.
 
 ## What is human-only, and why
 
-### 1. A six-entry allowlist (trivial)
+### 1. Assembly names are no longer restricted (done)
 
-`varmelt/genome.py:44-61` is the only place any assembly name is validated:
+`varmelt/genome.py` used to reject anything outside a six-entry allowlist.
+`normalise_assembly` now maps known aliases and passes everything else
+through, so any assembly UCSC hosts can be designed on:
 
 ```python
-ASSEMBLY_MAP = {
-    "hg38": "hg38",
-    "hg19": "hg19",
-    "grch38": "hg38",
-    "grch37": "hg19",
-    "mm10": "mm10",
-    "mm39": "mm39",
+ASSEMBLY_MAP = {          # aliases only -- not a whitelist
+    "hg38": "hg38", "hg19": "hg19",
+    "grch38": "hg38", "grch37": "hg19", "b37": "hg19", "grcm38": "hg38",
+    "mm10": "mm10", "mm39": "mm39", "grcm39": "mm39",
 }
-
-def normalise_assembly(name: str) -> str:
-    key = name.lower().strip()
-    if key in ASSEMBLY_MAP:
-        return ASSEMBLY_MAP[key]
-    raise ValueError(f"Unknown assembly: {name!r}")
 ```
 
-`mm10`/`mm39` are already whitelisted but unreachable from either UI, so today
-they only work via `varmelt.cli --genome mm10`. Note also that the gate runs
-at `genome.py:77` and `genome.py:112` **before** the local-2bit branch
-(`genome.py:78`, `genome.py:157`), so a custom assembly name is rejected even
-when the user supplies their own genome file. Moving the gate below the
-2bit branch is a one-line change that makes "bring your own genome" work
-immediately.
+`COMMON_ASSEMBLIES` is a *suggestion* list for the GUI combo (which is
+editable), not a limit. An assembly UCSC does not host raises a `ValueError`
+naming the build, noting that the API is **case-sensitive** (`danRer11` works,
+`danrer11` is a 400) and pointing at `/list/ucscGenomes`.
+
+The local-2bit branch is now taken *before* name validation, so a custom
+assembly name works with a user-supplied genome file.
+
+### 1b. Verified on ten non-human builds
+
+Real fragments designed through `design.design_variant`, 72 candidates each,
+`3' dbSNP` correctly reporting `dbSNP lookup unavailable`:
+
+| build | species | contig used |
+|---|---|---|
+| mm39 | mouse | `chr1` |
+| rn6 | rat | `chr1` |
+| danRer11 | zebrafish | `chr1` |
+| galGal6 | chicken | `chr1` |
+| sacCer3 | yeast | `chrI` |
+| ce11 | *C. elegans* | `chrI` |
+| dm6 | *D. melanogaster* | `chr2L` |
+| susScr11 | pig | `chr1` |
+| canFam6 | dog | `chr1` |
+| bosTau9 | cow | `chr1` |
+
+Contig lookup is case-tolerant (`chrx` finds `chrX`) and an unknown contig now
+raises a message naming the build and listing example contigs, instead of a
+bare `KeyError`.
 
 ### 2. The only sequence source is UCSC-shaped (the real blocker)
 
@@ -121,16 +170,18 @@ require sequences from somewhere else.
 
 - rsIDs resolve through the NCBI refsnp service (`dbsnp.py:16`), which is
   human/dbSNP-only; there is no non-human equivalent of `rs` identifiers.
-- Assembly matching is GRCh-only (`GRCH2UCSC`, `dbsnp.py:32`), and contig
-  translation assumes human RefSeq accessions (`NC_000006.12` → `chr6`).
+  `dbsnp.is_human_assembly()` states this explicitly, and `resolve` now fails
+  with "dbSNP rsIDs are human-only … use coordinates" instead of a generic
+  "not resolved" message.
+- The design dialog refuses a batch that mixes rsIDs with a non-human build,
+  explaining why, rather than failing per variant.
 - The regional SNP filter uses human-only track names
   (`SNP_TRACKS` at `dbsnp.py:157`). mm10/mm39 have `snp142Common`-style
   tracks; worm, fly, zebrafish and yeast have no such track at all.
 
-The good news: this already degrades safely. `dbsnp.rs_in` returns `None`
-off-human and callers print "dbSNP lookup unavailable" rather than failing, so
-**non-human analysis already runs today — via coordinates.** What is missing is
-saying so explicitly instead of surfacing it as an error string.
+The rest degrades safely: `dbsnp.rs_in` returns `None` off-human and callers
+print "dbSNP lookup unavailable" rather than failing, so **non-human analysis
+runs today, on coordinates.**
 
 ### 4. Hardcoded build lists in the UIs (easy)
 
@@ -140,21 +191,17 @@ saying so explicitly instead of surfacing it as an error string.
   third option as selected
 - CLI: free text plus `--genome ... help="hg19 or hg38"` — `cli.py:631`
 
-## Contig handling: already a problem for human, worse elsewhere
+## Contig handling: improved, still worth revisiting
 
-All current UCSC targets are `chr`-prefixed, so `_norm_chrom`
-(`genome.py:183`) happens to be correct for them. Two latent bugs get much
-more visible with other organisms:
+All current UCSC targets are `chr`-prefixed, so `_norm_chrom` is correct for
+them, and lookups are now case-tolerant (`chrx` → `chrX`) with a message that
+names the build and shows example contigs when the contig is genuinely absent.
+The webapp's own form is unchanged and still lowercases the contig
+(`webapp.py:51`) and requires a literal `chr` prefix (`webapp.py:35`), so
+`chrx` typed into the web form still fails and a bare `7:140453136 T>A` is
+still dropped. That is a webapp bug, independent of species.
 
-- `webapp.py:51` lowercases the contig, so `chrX` → `chrx` → `KeyError`.
-- The webapp variant regex requires a literal `chr` prefix
-  (`webapp.py:35`), so a bare `7:140453136 T>A` is silently dropped.
-
-Both would bite `chr2L` (fly), `chrI` (worm/yeast) and `NC_…` bacterial
-contigs immediately. An unknown contig currently surfaces as a bare
-`KeyError` from `genome.py:200`.
-
-Two further points are specific to non-eukaryotic genomes:
+Two further points are specific to non-eukaryotic genomes, and remain open:
 
 - **"Chromosome" is the wrong word.** Bacterial and viral contigs are named
   `NC_012920.1`, `plasmid_pXYZ`, and a single organism may have several
@@ -168,32 +215,29 @@ Two further points are specific to non-eukaryotic genomes:
 
 ## Recommended approach
 
-**Do not grow the allowlist — that is the dead end.** Introduce a sequence
-provider seam, and let the registry be data.
+**Do not grow the allowlist — that is the dead end.** What is left is the
+sequence-provider seam, with the registry kept as data.
 
-1. **A `BUILDS` registry as data** — `ucsc_name`, `species`, `aliases`,
-   contig prefix style, and `dbsnp_tracks | None`. Have
-   `normalise_assembly`, the GUI combo, the webapp `<select>` and the CLI help
-   all read from it, so adding a vertebrate is a data change. This alone makes
-   mouse, rat, zebrafish, chicken, pig, cow, dog, yeast, worm and fly
-   selectable, and turns the per-assembly SNP-track question into data.
+1. ~~**A `BUILDS` registry as data**~~ — *largely done*: assembly names are
+   open-ended, `COMMON_ASSEMBLIES` drives the GUI suggestions, and the
+   per-assembly dbSNP question is answered by `is_human_assembly()`. A fuller
+   registry (species label, contig prefix style, per-assembly SNP tracks) would
+   still tidy this up.
 2. **A `GenomeSource` seam** — `contig_sizes()` plus
    `sequence(contig, start, end)`, with implementations for
-   (a) UCSC REST (existing), (b) local 2bit (already written, just gated),
-   (c) local FASTA with an index, and optionally (d) Ensembl/NCBI REST.
-   (b) and (c) are what make bacteria, viruses, plants and any custom
-   assembly work, and (c) is the only route for assemblies absent from UCSC.
-3. **Rename chromosome → contig throughout the user-facing surface**, drop the
-   forced `chr` prefix, accept bare and dotted accessions, and turn the bare
-   `KeyError` into a real "contig not in <build>" message.
-4. **State the rsID policy.** Cheapest correct answer: rsID lookup is
-   human-only; on any other build the app runs coordinate-only and says so.
-   Revisit a VEP-backed or per-species variant source only if needed.
+   (a) UCSC REST (existing), (b) local 2bit (already written, and now reachable
+   with a custom assembly name), (c) **local FASTA with an index — the missing
+   piece**, and optionally (d) Ensembl/NCBI REST. Only (c) makes bacteria,
+   viruses, plants and arbitrary custom assemblies work.
+3. **Finish the contig work** — the core is case-tolerant now; the webapp form
+   still needs its `.lower()` and `chr`-prefix handling fixed, and "chromosome"
+   should become "contig" in the user-facing surface.
+4. ~~**State the rsID policy**~~ — *done* (`is_human_assembly`, explicit
+   messages, dialog-level guard).
 5. **Circular topology**, if and when bacterial/viral use is real.
 
-Steps 1-3 are small and unblock every vertebrate plus the whole
-bring-your-own-file long tail. Step 4 is mostly wording. Step 5 is the only
-one that needs real design.
+Step 2(c) is the only substantial piece left, and it is the one that matters
+for the long tail.
 
 ## Not verified / open
 

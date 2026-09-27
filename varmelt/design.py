@@ -38,6 +38,39 @@ _SPEC_RE = re.compile(
     r"(?P<alt>[ACGT]+)"
     r"\s*\)?\s*$", re.IGNORECASE)
 
+# An optional per-variant genome build, written *after* the variant:
+#
+#     chr16:30391275 T>C mm10            bare token
+#     chr16:30391275 T>C genome=mm10     explicit and typo-proof
+#     rs113488022 | rn6                  separator also works
+#
+# A bare token may not look like a contig or an rsID, so a lost newline gluing
+# two variants together ("...T>Cchr12:8994076 C>A") still splits correctly.
+_BUILD_TOKEN = r"(?!(?:chr)?\d)(?!(?:rs)\d)[A-Za-z][A-Za-z0-9._]*"
+_TRAILING_BUILD_RE = re.compile(
+    r"(?:\s+|[;,|]\s*)"
+    r"(?:(?:genome|build|assembly)\s*[=:]\s*)?"
+    r"(?P<build>" + _BUILD_TOKEN + r")\s*[;,|)]?\s*$", re.IGNORECASE)
+
+
+def split_build(text: str):
+    """Split a trailing genome build off one variant token.
+
+    Returns ``(body, build)``, with *build* ``None`` when there is none.
+    Raises :class:`ValueError` if a build is given with no variant in front of
+    it, which is almost always a mangled paste.
+    """
+    t = (text or "").strip()
+    if not t:
+        return t, None
+    m = _TRAILING_BUILD_RE.search(t)
+    if not m:
+        return t, None
+    head = t[:m.start()].strip().rstrip(";,|").strip()
+    if not head:
+        raise ValueError(f"no variant before the genome build in {text!r}")
+    return head, m.group("build")
+
 
 def split_specs(text: str) -> list:
     """Split a pasted blob into individual variant specs.
@@ -64,29 +97,40 @@ _SPEC_SCAN_RE = re.compile(
     r"rs\d+"
     r"|(?:(?:chr)?[A-Za-z0-9]+)(?:[: ]\s*\d{1,12})"
     r"(?:\s*[: ]?\s*\(?[ACGT]+>+[ACGT]+(?=[\s,;)]|(?:chr|[0-9]|rs\d)|$)"
-    r"\)?)?",
+    r"\)?)?"
+    # optional trailing genome build, kept with the variant it belongs to
+    r"(?:(?:\s+|[;,|]\s*)"
+    r"(?:(?:genome|build|assembly)\s*[=:]\s*)?"
+    + _BUILD_TOKEN + r"(?=[\s,;)|)]|$))*",
     re.IGNORECASE)
 
 
 def parse_variant_spec(text: str) -> dict:
     """Parse one user-typed variant into engine keyword arguments.
 
-    Accepted shapes (spaces, ``:``, ``>`` vs ``->``/``\u2192`` and optional
+    Accepted shapes (spaces, ``:``, ``>`` vs ``->``/``\\u2192`` and optional
     surrounding parentheses are tolerated):
 
     - ``rs113488022``                         (dbSNP rsID)
     - ``chr16:30391275 T>C``                  (chrom:position ref>alt)
     - ``chr16:30391275T>C`` / ``16 30391275 T>C``
+    - ``chr16:30391275 T>C mm10``             (per-variant genome build)
+    - ``chr16:30391275 T>C genome=rn6``       (same, explicit)
+    - ``rs113488022 | danRer11``              (separator instead of a space)
+
+    A trailing build is returned as ``genome`` in the result and overrides the
+    dialog's build for this variant only.
 
     Raises ``ValueError`` with a message naming the offending text.
     """
-    t = (text or "").strip()
-    if not t:
-        raise ValueError("empty variant")
+    t, build = split_build(text)
     t = t.replace("\u2192", ">").replace("->", ">")
     rsm = re.match(r"^\s*(rs\d+)\s*$", t, re.IGNORECASE)
     if rsm:
-        return {"rsid": rsm.group(1).lower()}
+        out = {"rsid": rsm.group(1).lower()}
+        if build:
+            out["genome"] = build
+        return out
     m = _SPEC_RE.match(t)
     if not m:
         raise ValueError(
@@ -95,14 +139,20 @@ def parse_variant_spec(text: str) -> dict:
     chrom = m.group("chrom")
     if not chrom.lower().startswith("chr"):
         chrom = "chr" + chrom
-    return {"chrom": chrom, "pos": int(m.group("pos")),
-            "ref": m.group("ref").upper(), "alt": m.group("alt").upper()}
+    out = {"chrom": chrom, "pos": int(m.group("pos")),
+           "ref": m.group("ref").upper(), "alt": m.group("alt").upper()}
+    if build:
+        out["genome"] = build
+    return out
 
 
 def spec_label(spec: dict) -> str:
     if spec.get("rsid"):
-        return str(spec["rsid"])
-    return f"{spec['chrom']}:{spec['pos']} {spec['ref']}>{spec['alt']}"
+        label = str(spec["rsid"])
+    else:
+        label = f"{spec['chrom']}:{spec['pos']} {spec['ref']}>{spec['alt']}"
+    build = spec.get("genome")
+    return f"{label} {build}" if build else label
 
 
 @dataclass

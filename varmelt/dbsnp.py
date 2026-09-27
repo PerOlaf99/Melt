@@ -36,6 +36,22 @@ GRCH2UCSC = {
     "hg19": "hg19",
 }
 
+# dbSNP rsIDs are a human identifier space: the NCBI refsnp service only knows
+# human variants, and the regional SNP tracks below are human-only too.  On any
+# other build the app still runs, but on coordinates rather than rsIDs.
+HUMAN_ASSEMBLIES = tuple(GRCH2UCSC)
+
+
+def is_human_assembly(assembly: str) -> bool:
+    """True when *assembly* is one dbSNP rsIDs can be resolved against."""
+    from . import genome
+
+    try:
+        name = genome.normalise_assembly(assembly)
+    except ValueError:
+        return False
+    return name in {"hg38", "hg19"}
+
 
 class VariantError(ValueError):
     """Raised when an rsID cannot be resolved to a usable variant."""
@@ -86,8 +102,14 @@ def resolve(rsid: str, assembly: str = "hg38", timeout: int = 20):
 
     ``pos`` is returned 0-based; the reference sequence is fetched by the
     caller.  Raises :class:`VariantError` when no placement matches the
-    requested assembly.
+    requested assembly, including when the build is not a human one at all
+    (rsIDs do not exist outside human).
     """
+    if not is_human_assembly(assembly):
+        raise VariantError(
+            f"rsID {rsid} cannot be used on build {assembly!r}: dbSNP rsIDs "
+            f"are human-only.  Give coordinates instead, e.g. "
+            f"chr1:12345 A>G on {assembly}.")
     assembly = assembly.lower()
     data = fetch_refsnp(rsid, timeout=timeout)
     snap = data.get("primary_snapshot_data", {})
