@@ -299,11 +299,15 @@ def _hgvs_spec(cell: str):
 
 
 def _rows_to_specs(rows) -> list:
+    # Work on trimmed copies: strip each cell, drop fully-empty rows so a
+    # stray formatting row never derails header detection.
     rows = [[(c or "").strip() for c in r] for r in rows]
     rows = [r for r in rows if any(r)]
     if not rows:
         return []
 
+    # Find the header row (a title line may sit above it) and slice the data
+    # below it; without a header everything is treated as data.
     hdr_idx, hdr = _find_header(rows)
     data = rows[hdr_idx + 1:] if hdr is not None else rows
 

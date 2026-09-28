@@ -233,22 +233,26 @@ def test_chart_renders_png():
     ok(win.table.rowCount() == 2, "primer table row per computed item")
     ok(win.table.columnCount() == 12,
        "primer table carries a separation (delta-area) column")
-    ok(win.table.item(0, 0).text() == "frag"
-       and win.table.item(1, 0).text() == "frag_pair",
+    # rows are sorted by the last header click, so find each amplicon by name
+    cell = win.table.item(0, 0).text()
+    seq_row = 0 if cell == "frag" else 1
+    pair_row = 1 - seq_row
+    ok(win.table.item(seq_row, 0).text() == "frag"
+       and win.table.item(pair_row, 0).text() == "frag_pair",
        "amplicon names in the first column")
-    ok(win.table.item(0, 1).text() == SEQ[:20],
+    ok(win.table.item(seq_row, 1).text() == SEQ[:20],
        "forward primer still the bare 20-mer")
-    ok(win.table.item(1, 7).text() == str(80 + len(GC_CLAMP)),
+    ok(win.table.item(pair_row, 7).text() == str(80 + len(GC_CLAMP)),
        "pair column: fragment length includes the 3' GC clamp")
-    ok(win.table.item(0, 7).text() == str(80 + len(GC_CLAMP)),
+    ok(win.table.item(seq_row, 7).text() == str(80 + len(GC_CLAMP)),
        "seq column: fragment length includes the 5' GC clamp")
-    ok(float(win.table.item(1, 9).text()) > 0,
+    ok(float(win.table.item(pair_row, 9).text()) > 0,
        "pair delta area is a positive number")
-    ok(win.table.item(1, 11).text() in ("flat/slope ok", "n/a")
-       or win.table.item(1, 11).text().startswith("dip"),
+    ok(win.table.item(pair_row, 11).text() in ("flat/slope ok", "n/a")
+       or win.table.item(pair_row, 11).text().startswith("dip"),
        "pair melting shape is reported")
     ok(win._csv_row(win.project.items[1])[10]
-       == win.table.item(1, 9).text(),
+       == win.table.item(pair_row, 9).text(),
        "csv delta area matches the table cell")
 
     # untick the pair -> a single dataset remains
@@ -354,7 +358,7 @@ def test_edit_field_bare_headers():
 
 def test_project_schema():
     d = Project(na=0.05).to_dict()
-    ok(d["app"] == "varmelt melt" and d["version"] == 1,
+    ok(d["app"] == "MeltScope" and d["version"] == 1,
        "project carries app + version")
     ok(Project.from_dict(d).na == 0.05, "na stored in schema")
 
@@ -770,7 +774,7 @@ def test_design_import_list():
 
 def test_design_multi_select_add():
     """Ctrl/Shift multi-selection adds every chosen candidate at once."""
-    from PySide6.QtCore import QItemSelectionModel
+    from PySide6.QtCore import QItemSelectionModel, Qt
     from PySide6.QtWidgets import QApplication, QTableWidgetItem
     from varmelt.gui.main import MainWindow
 
@@ -792,7 +796,9 @@ def test_design_multi_select_add():
     dlg._cands = [mk(0), mk(1), mk(2)]
     dlg.table.setRowCount(3)
     for r, c in enumerate(dlg._cands):
-        dlg.table.setItem(r, 0, QTableWidgetItem(c.name))
+        cell = QTableWidgetItem(c.name)
+        cell.setData(Qt.UserRole, r)
+        dlg.table.setItem(r, 0, cell)
     sm = dlg.table.selectionModel()
     model = dlg.table.model()
     for row in (0, 2):
@@ -806,6 +812,73 @@ def test_design_multi_select_add():
     dlg.candidates.connect(lambda cands: n.__setitem__(0, len(cands)))
     dlg._add_selected()
     ok(n[0] == 2, "Add selected emits the two chosen candidates")
+    dlg.close()
+
+
+def test_design_large_batch_adds_untoggled():
+    """Batches >15 add fragment info but leave the graphs un-toggled."""
+    from PySide6.QtWidgets import QApplication
+    from varmelt.gui.main import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+
+    def mk(i):
+        return type("C", (), {
+            "name": f"v{i}", "chrom": "chr7", "pos": 1000 + i, "rsid": None,
+            "ref": "T", "alt": "A", "fp": "FP", "rp": "RP", "ps": 0, "pe": 1,
+            "wt_amp": "ACGT" * 30,
+            "mut_amp": "ACGT" * 29 + "TGCA", "ft": 60.0,
+            "rt": 61.0, "clamp": "5'", "shape": "ok", "snps_3prime": "none",
+            "delta_area": 10.0 + i, "score": 90})()
+    win = MainWindow()
+    win._open_design()
+    dlg = win._design_dlg
+    cands = [mk(i) for i in range(16)]          # 16 > MAX_AUTO_PLOTTED_BATCH
+    win._add_designed_many(cands)
+    app.processEvents()
+    ok(len(win.project.items) == 16, "all 16 fragments were added")
+    ok(all(not it.plot for it in win.project.items),
+       "large-batch fragments arrive with graphs off")
+    ok(win.table.rowCount() == 16,
+       "the primer/fragment table is populated for the batch")
+    dlg.close()
+
+
+def test_design_sorted_selection_maps_to_candidates():
+    """Sorting the table does not break which candidate Add resolves."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication, QTableWidgetItem
+    from varmelt.gui.main import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+
+    def mk(score):
+        return type("C", (), {
+            "name": f"c{score}", "chrom": "chr7", "pos": 1000, "rsid": None,
+            "ref": "T", "alt": "A", "fp": "FP", "rp": "RP", "ps": 0, "pe": 1,
+            "wt_amp": "ACGT" * 30,
+            "mut_amp": "ACGT" * 29 + "TGCA", "ft": 60.0,
+            "rt": 61.0, "clamp": "5'", "shape": "ok", "snps_3prime": "none",
+            "delta_area": 12.4, "score": score})()
+    win = MainWindow()
+    win._open_design()
+    dlg = win._design_dlg
+    dlg._cands = [mk(90), mk(80), mk(95)]
+    dlg.table.setRowCount(3)
+    for r, c in enumerate(dlg._cands):
+        cell = QTableWidgetItem(c.name)
+        cell.setData(Qt.UserRole + 1, r)
+        dlg.table.setItem(r, 0, cell)
+    dlg.table.setItem(2, 2, QTableWidgetItem("120 bp"))   # a length cell
+    # visual reorder: sort the Fragment column ascending -> 120 bp last? no,
+    # ascending puts 120 bp first; verify the empty cells sort as blanks
+    dlg.table.setSortingEnabled(True)
+    dlg.table.sortItems(2, Qt.AscendingOrder)
+    app.processEvents()
+    first = dlg.table.item(0, 0).text()
+    # whichever row is on top, the stored role must resolve to a candidate
+    ok(dlg._candidate_at_row(0) is not None, "sorted row still maps to candidate")
+    ok(dlg._candidate_at_row(2) is not None, "last sorted row maps too")
     dlg.close()
 
 
@@ -823,6 +896,8 @@ if __name__ == "__main__":
     test_design_shutdown_stops_running_batch()
     test_design_import_list()
     test_design_multi_select_add()
+    test_design_large_batch_adds_untoggled()
+    test_design_sorted_selection_maps_to_candidates()
     test_buttons_and_table()
     print("\n" + ("ALL GUI TESTS PASSED" if failures == 0
                   else f"{failures} FAILURE(S)"))

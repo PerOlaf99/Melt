@@ -15,6 +15,12 @@ from PySide6.QtWidgets import (QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
                                QLabel, QPlainTextEdit, QPushButton, QSpinBox,
                                QTableWidget, QTableWidgetItem, QVBoxLayout)
 
+# Columns that should sort numerically: handled by the fill below, which
+# stores per-cell UserRole sort keys (numeric or tuple) on SortableItems.
+# "Add best of each variant" batches bigger than this land in the project
+# with their graphs un-toggled; only the fragment table is refreshed then.
+MAX_AUTO_PLOTTED_BATCH = 15
+
 SCORE_NOTE = ("Score 0-100: dip-free (45) + resolvable wt/mut difference "
               "(30) + primer Tm in range (10) + short fragment (10) "
               "+ dbSNP-free 3' ends (5).")
@@ -166,6 +172,8 @@ class DesignDialog(QDialog):
         form.addRow("Variant(s)", self.specs_edit)
 
         import_row = QHBoxLayout()
+        # "Import variant list" reads whole files (ODS/XLSX/CSV/TSV/TXT/VCF,
+        # Windows/Mac line endings) into the Variant(s) box.
         self.import_btn = QPushButton("Import variant list\u2026")
         self.import_btn.setToolTip(
             "read variants from a spreadsheet (.ods / .xlsx), a delimited "
@@ -173,10 +181,11 @@ class DesignDialog(QDialog):
             "endings are detected automatically; CHROM/POS/REF/ALT, "
             "GENOMIC_CHANGE and plain variant columns are recognised")
         self.import_btn.clicked.connect(self._on_import)
+        # Shortcut for the common case: the list was called against
+        # GRCh37, which is the same assembly as UCSC's hg19.
         set_build_btn = QPushButton("Set build hg19")
         set_build_btn.setToolTip("your list is called against GRCh37 == hg19")
-        set_build_btn.clicked.connect(
-            lambda: self.genome_combo.setCurrentText("hg19"))
+        set_build_btn.clicked.connect(self._set_build_hg19)
         import_row.addWidget(self.import_btn)
         import_row.addWidget(set_build_btn)
         import_row.addStretch(1)
@@ -243,6 +252,13 @@ class DesignDialog(QDialog):
         self.table.setToolTip(
             "Click column headers to sort (numeric for Score, length, Δarea, Tm).\n"
             "Ctrl+click / Shift+click to select multiple rows, then Add selected.")
+        for c, w in enumerate((150, 45, 70, 130, 70, 80, 50, 140)):
+            self.table.setColumnWidth(c, w)
+        # Clickable headers for the fragment table: default the sort to the
+        # Score column, keep the user's chosen column/order for later batches.
+        self._sort_col, self._sort_order = 1, Qt.DescendingOrder
+        self.table.horizontalHeader().sectionClicked.connect(
+            self._on_sort_header)
 
         add_row = QHBoxLayout()
         self.add_btn = QPushButton("Add &selected")
@@ -270,6 +286,12 @@ class DesignDialog(QDialog):
         body.addLayout(add_row)
 
     # ------------------------------------------------------------ design - #
+    def _set_build_hg19(self):
+        self.genome_combo.setCurrentText("hg19")
+        self.status.setText(
+            "Genome build: hg19 (GRCh37) - the imported list's coordinates "
+            "are now interpreted against GRCh37.")
+
     def _on_import(self):
         import os
 
@@ -415,9 +437,9 @@ class DesignDialog(QDialog):
         self.add_btn.setEnabled(bool(cands) and self.table.currentRow() >= 0)
         self.add_best_btn.setEnabled(bool(cands))
         self._thread = None
-        # Default: Score descending (matches engine ranking)
+        # Re-apply the user's chosen sort (default: Score desc = engine order)
         self.table.setSortingEnabled(True)
-        self.table.sortItems(1, Qt.DescendingOrder)
+        self.table.sortItems(self._sort_col, self._sort_order)
         self._autofit_columns()
 
 
@@ -467,6 +489,11 @@ class DesignDialog(QDialog):
         super().closeEvent(event)
 
     # ------------------------------------------------------------- add - #
+    def _on_sort_header(self, col):
+        """Remember the user's chosen sort so the next batch keeps it."""
+        self._sort_col = col
+        self._sort_order = self.table.horizontalHeader().sortIndicatorOrder()
+
     def _sync_add_btn(self):
         self.add_btn.setEnabled(
             bool(self._cands)

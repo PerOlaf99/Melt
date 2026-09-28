@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox,
 from .. import cli, webapp
 from .design import SortableItem
 from .dialogs import AddPairDialog, AddSequenceDialog, EditItemDialog
-from .model import CLAMP_SIDES, Item, Project
+from .model import APP_VERSION, CLAMP_SIDES, Item, Project
 from .plot import MeltChart, PALETTE, set_chart_theme
 from . import help_docs
 
@@ -113,8 +113,8 @@ class MainWindow(QMainWindow):
         self._debounce.setSingleShot(True)
         self._debounce.setInterval(400)
         self._debounce.timeout.connect(self._recompute_current)
-
-        self.setWindowTitle("MeltScope — CTCE variant melting design")
+        self.setWindowTitle(
+            f"MeltScope v{APP_VERSION} — CTCE variant melting design")
         self.resize(1150, 720)
         self._build_ui()
         self._build_menus()
@@ -444,11 +444,19 @@ class MainWindow(QMainWindow):
         noted and one summary warning is shown at the end.  All rows are
         attached first and the views refreshed once, so adding many
         variants at once stays fast.
+
+        For big batches (> MAX_AUTO_PLOTTED_BATCH, e.g. the full 400-variant
+        list) plotting every fragment at once would choke the chart, so the
+        items are added with their graphs *un-toggled*: only the list and the
+        primer/fragment table are refreshed, and the user ticks individual
+        rows in the list to plot the ones they want to inspect.
         """
+        from .design import MAX_AUTO_PLOTTED_BATCH
+        many = len(cands) > MAX_AUTO_PLOTTED_BATCH
         added, bad = 0, []
         for cand in cands:
             try:
-                it, err = self._make_designed_item(cand)
+                it, err = self._make_designed_item(cand, plot=not many)
                 if it is None:
                     bad.append(f"{cand.name}: {err}")
                     continue
@@ -458,11 +466,14 @@ class MainWindow(QMainWindow):
                 bad.append(f"{cand.name}: {exc}")
         if added:
             self._refresh_list()
-            self._render_plots()
+            if not many:
+                self._render_plots()
             self._render_table()
             self._select_index(len(self.project.items) - 1)
             self.statusBar().showMessage(
-                f"designed fragments added: {added}", 6000)
+                f"designed fragments added: {added}"
+                + (" (graphs off - tick items in the list to plot them)"
+                   if many else ""), 6000)
         if bad:
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.warning(
@@ -470,21 +481,25 @@ class MainWindow(QMainWindow):
                 "Could not add these designed fragments:\n\n"
                 + "\n".join(f"- {b}" for b in bad))
 
-    def _make_designed_item(self, cand):
+    def _make_designed_item(self, cand, plot: bool = True):
         """Build + compute a pair Item for a designed candidate.
 
         Returns ``(Item, "")`` on success or ``(None, error text)`` when the
-        candidate cannot be computed; never raises."""
+        candidate cannot be computed; never raises.  *plot* toggles the new
+        item's graph in the overlay chart (flipped off for the un-toggled
+        large-batch path, since hundreds of overlays are not legible).
+        """
         from .model import Item
         it = Item(kind="pair", name=cand.name, wt=cand.wt_amp,
                   mut=cand.mut_amp, clamp=cand.clamp or "5'")
+        it.plot = plot
         it.compute(self.project.na)
         if it.error:
             return None, it.error
         return it, ""
 
     def _add_designed(self, cand, quiet: bool = False):
-        """Append a designed candidate to the project as a normal pair item."""
+        """Append a single designed candidate to the project."""
         it, err = self._make_designed_item(cand)
         if it is None:
             if not quiet:
@@ -1032,7 +1047,8 @@ class MainWindow(QMainWindow):
 
     def _about(self):
         QMessageBox.about(self, "MeltScope",
-                          "MeltScope — WinMelt-style melting-profile "
+                          f"MeltScope v{APP_VERSION} — WinMelt-style "
+                          "melting-profile "
                           "workbench.\n\nPaste any DNA fragment (or "
                           "wildtype/mutant pair), add a GC clamp, adjust "
                           "the salt, and inspect the per-base melt map and "
@@ -1043,7 +1059,8 @@ class MainWindow(QMainWindow):
 
     def _update_title(self):
         base = os.path.basename(self.path) if self.path else "untitled"
-        self.setWindowTitle(f"MeltScope — CTCE variant melting design — {base}")
+        self.setWindowTitle(
+            f"MeltScope v{APP_VERSION} — CTCE variant melting design — {base}")
 
     def closeEvent(self, event):                    # noqa: N802
         self._debounce.stop()
