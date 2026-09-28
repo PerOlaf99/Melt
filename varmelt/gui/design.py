@@ -271,8 +271,22 @@ class DesignDialog(QDialog):
             "For each distinct variant, add only the highest-scoring candidate.")
         self.add_best_btn.clicked.connect(self._add_best_each)
         self.add_best_btn.setEnabled(False)
+        self.save_btn = QPushButton("Save candidates\u2026")
+        self.save_btn.setToolTip(
+            "Write the whole candidate list (all fragments, not just the "
+            "added ones) to a JSON file, so a later session can open it "
+            "again without re-running the design.")
+        self.save_btn.clicked.connect(self._save_candidates)
+        self.save_btn.setEnabled(False)
+        self.load_btn = QPushButton("Load candidates\u2026")
+        self.load_btn.setToolTip(
+            "Re-open a previously saved candidate list into this table "
+            "and add fragments from it just like a fresh batch.")
+        self.load_btn.clicked.connect(self._load_candidates)
         add_row.addWidget(self.add_btn)
         add_row.addWidget(self.add_best_btn)
+        add_row.addWidget(self.save_btn)
+        add_row.addWidget(self.load_btn)
         add_row.addStretch(1)
 
         body = QVBoxLayout(self)
@@ -402,6 +416,17 @@ class DesignDialog(QDialog):
         self.table.resizeRowsToContents()
 
     def _on_result(self, cands, errors):
+        self._thread = None
+        self._set_busy(False)
+        self._show_candidates(cands, errors)
+
+    def _show_candidates(self, cands, errors=()):
+        """Repopulate the candidate table from a list of candidates.
+
+        Used both when a design batch finishes and when a previously saved
+        candidate list is loaded back, so "go back to that batch" does not
+        mean re-running the whole design.
+        """
         self._cands = list(cands)
         self.table.setSortingEnabled(False)
         self.table.setRowCount(len(cands))
@@ -433,14 +458,108 @@ class DesignDialog(QDialog):
             else "no candidate span these variants"
         if errors:
             msg += "  \u2014  failed: " + "; ".join(errors)
-        self._set_busy(False, msg)
+        self.status.setText(msg)
         self.add_btn.setEnabled(bool(cands) and self.table.currentRow() >= 0)
         self.add_best_btn.setEnabled(bool(cands))
-        self._thread = None
+        self.save_btn.setEnabled(bool(cands))
         # Re-apply the user's chosen sort (default: Score desc = engine order)
         self.table.setSortingEnabled(True)
         self.table.sortItems(self._sort_col, self._sort_order)
         self._autofit_columns()
+
+    # --------------------------------------------------- save / reload - #
+    def _candidate_payload(self) -> list:
+        """Every candidate as a flat JSON-able dict (incl. its genome build)."""
+        import dataclasses
+        from ..design import Candidate
+        fields = frozenset(f.name for f in dataclasses.fields(Candidate))
+        out = []
+        for c in self._cands:
+            d = dataclasses.asdict(c)
+            d["genome"] = getattr(c, "genome", None)
+            out.append({k: d[k] for k in d if k in fields or k == "genome"})
+        return out
+
+    def _save_candidates(self):
+        import json
+        import os
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save design candidates", "design.candidates.json",
+            "MeltScope design candidates (*.candidates.json)")
+        if not path:
+            return
+        if not path.endswith(".candidates.json"):
+            path += ".candidates.json"
+        payload = {
+            "format": "MeltScope design candidates",
+            "version": 1,
+            "settings": self._base(),
+            "candidates": self._candidate_payload(),
+        }
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, indent=1, ensure_ascii=True)
+        except OSError as exc:
+            self.status.setText(f'<font color="#a00">save failed: '
+                                f'{exc}</font>')
+            return
+        self.status.setText(
+            f"saved {len(self._cands)} candidate(s) to "
+            f"{os.path.basename(path)}")
+
+    def _load_candidates(self):
+        import dataclasses
+        import json
+        import os
+
+        from ..design import Candidate
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load design candidates", "",
+            "MeltScope design candidates (*.candidates.json);;All files (*)")
+        if not path:
+            return
+        try:
+            with open(path, encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except (OSError, ValueError) as exc:
+            self.status.setText(f'<font color="#a00">load failed: '
+                                f'{exc}</font>')
+            return
+        rows = payload.get("candidates") if isinstance(payload, dict) \
+            else None
+        if not rows:
+            self.status.setText(
+                '<font color="#a00">no candidates in that file</font>')
+            return
+        keys = frozenset(f.name for f in dataclasses.fields(Candidate))
+        cands = []
+        try:
+            for raw in rows:
+                c = Candidate(**{k: raw[k] for k in raw if k in keys})
+                if raw.get("genome"):
+                    c.genome = raw["genome"]
+                cands.append(c)
+        except (TypeError, ValueError, KeyError) as exc:
+            self.status.setText(f'<font color="#a00">load failed: '
+                                f'{exc}</font>')
+            return
+        # Restore the build/salt the batch was designed against, so re-adding
+        # fragments reproduces the saved experiment.
+        settings = payload.get("settings")
+        if isinstance(settings, dict):
+            if settings.get("genome"):
+                self.genome_combo.setCurrentText(settings["genome"])
+            if settings.get("na"):
+                self.na_spin.setValue(float(settings["na"]))
+            if settings.get("max_frag"):
+                self.maxfrag_spin.setValue(int(settings["max_frag"]))
+        self._set_busy(False)
+        self._show_candidates(cands)
+        self.status.setText(
+            f"loaded {len(cands)} candidate(s) from "
+            f"{os.path.basename(path)} "
+            f"(add best / multi-select as usual)")
 
 
     def _on_error(self, message):

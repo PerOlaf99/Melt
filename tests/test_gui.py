@@ -882,6 +882,51 @@ def test_design_sorted_selection_maps_to_candidates():
     dlg.close()
 
 
+def test_design_save_load_candidates_roundtrip():
+    """A saved candidate batch can be reloaded without re-running design."""
+    import dataclasses
+    from PySide6.QtWidgets import QApplication
+    from varmelt.design import Candidate
+    from varmelt.gui.main import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+
+    def mk(score):
+        return Candidate(name=f"c{score}", chrom="chr16", pos=30391275,
+                         rsid="", ref="T", alt="C", fp="FP", rp="RP",
+                         ps=0, pe=1, product_len=120, fragment_len=130,
+                         ft=60.0, rt=61.0, clamp="5'", shape="flat/slope ok",
+                         snps_3prime="none", delta_area=12.4,
+                         wt_amp="ACGT" * 30, mut_amp="ACGT" * 29 + "TGCA",
+                         score=score)
+    win = MainWindow()
+    win._open_design()
+    dlg = win._design_dlg
+    for c in (mk(95), mk(80), mk(90)):
+        c.genome = "hg19"
+    dlg._show_candidates([mk(95), mk(80), mk(90)])
+    for c in dlg._cands:
+        c.genome = "hg19"
+    payload = dlg._candidate_payload()
+    ok(len(payload) == 3 and all(p["genome"] == "hg19" for p in payload),
+       "payload carries every candidate with its genome build")
+    keys = frozenset(f.name for f in dataclasses.fields(Candidate))
+    back = []
+    for raw in payload:
+        c = Candidate(**{k: raw[k] for k in raw if k in keys})
+        if raw.get("genome"):
+            c.genome = raw["genome"]
+        back.append(c)
+    dlg._show_candidates(back)
+    app.processEvents()
+    ok(dlg.table.rowCount() == 3, "reloaded list repopulates the table")
+    ok(all(getattr(c, "genome", None) == "hg19" for c in dlg._cands),
+       "genome survives the save/load round-trip")
+    ok(dlg.save_btn.isEnabled() and dlg.add_best_btn.isEnabled(),
+       "save/add enabled for the reloaded batch")
+    dlg.close()
+
+
 if __name__ == "__main__":
     test_model_compute_roundtrip()
     test_project_schema()
@@ -898,6 +943,7 @@ if __name__ == "__main__":
     test_design_multi_select_add()
     test_design_large_batch_adds_untoggled()
     test_design_sorted_selection_maps_to_candidates()
+    test_design_save_load_candidates_roundtrip()
     test_buttons_and_table()
     print("\n" + ("ALL GUI TESTS PASSED" if failures == 0
                   else f"{failures} FAILURE(S)"))
