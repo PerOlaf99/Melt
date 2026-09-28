@@ -8,8 +8,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox,
                                QDoubleSpinBox, QFileDialog, QHeaderView,
                                QHBoxLayout, QInputDialog, QLabel, QListWidget,
                                QListWidgetItem, QMainWindow, QMenu,
-                               QMessageBox, QPushButton, QSizePolicy,
-                               QSplitter, QTableWidget,
+                               QMessageBox, QProgressDialog, QPushButton,
+                               QSizePolicy, QSplitter, QTableWidget,
                                QVBoxLayout, QWidget)
 
 from .. import cli, webapp
@@ -128,7 +128,9 @@ class MainWindow(QMainWindow):
         left = QWidget()
         lay = QVBoxLayout(left)
         lay.setContentsMargins(0, 0, 0, 0)
-        L = QLabel("<b>Amplicons</b>")
+        L = QLabel("<b>Amplicons</b> (0)")
+        L.setObjectName("listTitle")
+        L.setToolTip("Number of amplicons in the project")
         lay.addWidget(L)
         self.list = QListWidget()
         self.list.itemSelectionChanged.connect(self._on_select)
@@ -164,21 +166,26 @@ class MainWindow(QMainWindow):
         b_del = QPushButton("Delete")
         b_del.setToolTip("Remove the selected amplicon")
         b_del.clicked.connect(self._remove_item)
-        for b in (b_add, b_plus, b_edit, b_dup, b_del):
+        b_clear = QPushButton("Clear")
+        b_clear.setToolTip("Remove every amplicon from the project at once")
+        b_clear.clicked.connect(self._clear_items)
+        for b in (b_add, b_plus, b_edit, b_dup, b_del, b_clear):
             b.setMinimumHeight(30)
             b.setFocusPolicy(Qt.NoFocus)
-        for b in (b_add, b_plus, b_edit, b_dup, b_del):
+        for b in (b_add, b_plus, b_edit, b_dup, b_del, b_clear):
             b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         row_add.addWidget(b_add)
         row_add.addWidget(b_plus)
         row_act.addWidget(b_edit)
         row_act.addWidget(b_dup)
         row_act.addWidget(b_del)
+        row_act.addWidget(b_clear)
         lay.addLayout(row_add)
         lay.addLayout(row_act)
         self._edit_button = b_edit
         self._dup_button = b_dup
         self._del_button = b_del
+        self._clear_button = b_clear
         self._update_action_buttons()
         self.list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._context_menu)
@@ -336,6 +343,12 @@ class MainWindow(QMainWindow):
                          "Ctrl+D",
                          "Design candidate fragments for an rsID or genomic "
                          "position (variant melting profile design)")
+        self._add_action(m_des, "Fragment tiling…", self._open_tiling,
+                         "Ctrl+T",
+                         "Cover a long segment (pasted or a GenBank "
+                         "accession, e.g. NC_012920) with overlapping "
+                         "120-200 bp fragments under a melt-temp cap; "
+                         "circular DNA tiles the origin too")
 
         m_exp = self.menuBar().addMenu("&Examples")
         self._add_action(m_exp, "BRAF 127 bp flat vs sloped",
@@ -436,6 +449,73 @@ class MainWindow(QMainWindow):
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()
+
+    def _open_tiling(self):
+        """Open the fragment-tiling dialog (one instance, stays open)."""
+        from .tiling import TilingDialog
+        dlg = getattr(self, "_tiling_dlg", None)
+        if dlg is None:
+            dlg = TilingDialog(self)
+            dlg.fragments.connect(self._add_tiling_fragments)
+            self._tiling_dlg = dlg
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
+    def _add_tiling_fragments(self, frags):
+        """Append tiling-walk fragments as ordinary amplicon items.
+
+        The melt of every fragment runs on a worker thread with a progress
+        bar, so adding a large walk does not freeze the window.  Large
+        walks (> MAX_AUTO_PLOTTED_BATCH, e.g. all of mtDNA ~140 fragments)
+        are added with their graphs *un-toggled* so the overlay chart is
+        not flooded; the list and fragment table always refresh.
+        """
+        from .design import MAX_AUTO_PLOTTED_BATCH
+        from .tiling import _AddFragmentsThread
+        if frags is None or not len(frags):
+            return
+        running = getattr(self, "_tiling_add_thread", None)
+        if running is not None and running.isRunning():
+            return                     # a batch is already being added
+        many = len(frags) > MAX_AUTO_PLOTTED_BATCH
+        pd = QProgressDialog(
+            f"Adding amplicons to the project\u2026", "", 0, len(frags), self)
+        pd.setCancelButton(None)
+        pd.setWindowModality(Qt.WindowModal)
+        pd.setMinimumDuration(0)
+        pd.setValue(0)
+        th = _AddFragmentsThread(list(frags), self.project.na, parent=self)
+        th.progress.connect(pd.setValue)
+        th.done.connect(
+            lambda items, bad: self._finish_tiling_add(  # noqa: B023
+                items, bad, many, pd))
+        self._tiling_add_thread = th
+        th.start()
+
+    def _finish_tiling_add(self, items, bad, many, pd):
+        """Attach the computed tiling items and refresh once."""
+        self._tiling_add_thread = None
+        pd.setValue(pd.maximum())
+        pd.close()
+        added = len(items)
+        if added:
+            for it in items:
+                it.plot = not many
+                self.project.add(it)
+            self._refresh_list()
+            if not many:
+                self._render_plots()
+            self._render_table()
+            self._select_index(len(self.project.items) - 1)
+            self.statusBar().showMessage(
+                f"added {added} tiling fragment(s)"
+                + (" (graphs off - tick items in the list to plot them)"
+                   if many else ""), 6000)
+        if bad:
+            QMessageBox.warning(
+                self, "MeltScope", f"Could not compute {bad} tiling "
+                "fragment(s) and they were skipped.")
 
     def _add_designed_many(self, cands):
         """Append the best fragment of every designed variant.
@@ -623,7 +703,10 @@ class MainWindow(QMainWindow):
         menu.addAction("Duplicate", self._duplicate_item)
         if it is not None:
             menu.addAction("Rename", self._rename_item)
-        menu.addAction("Delete", self._remove_item)
+        if self._current_item() is not None:
+            menu.addAction("Delete", self._remove_item)
+        if self.project.items:
+            menu.addAction("Clear all…", self._clear_items)
         menu.exec(self.list.viewport().mapToGlobal(pos))
 
     def keyPressEvent(self, event):                 # noqa: N802
@@ -644,6 +727,19 @@ class MainWindow(QMainWindow):
             self._refresh_list()
             self._recompute_current()
             self.statusBar().showMessage(f"deleted {name}", 2000)
+
+    def _clear_items(self):
+        n = len(self.project.items)
+        if not n:
+            return
+        self.project = Project()
+        self.path = None
+        self._refresh_list()
+        self._recompute_current()
+        self._render_plots()
+        self._render_table()
+        self.info.setText("no item selected")
+        self.statusBar().showMessage(f"cleared {n} amplicon(s)", 3000)
 
     def _new_project(self):
         self.project = Project()
@@ -822,8 +918,12 @@ class MainWindow(QMainWindow):
         enabled = self._current_item() is not None
         for b in (self._edit_button, self._dup_button, self._del_button):
             b.setEnabled(enabled)
+        self._clear_button.setEnabled(bool(self.project.items))
 
     def _refresh_list(self):
+        title = self.findChild(QLabel, "listTitle")
+        if title is not None:
+            title.setText(f"<b>Amplicons</b> ({len(self.project.items)})")
         selected = None
         if 0 <= self.list.currentRow() < len(self.project.items):
             selected = self.project.items[self.list.currentRow()]

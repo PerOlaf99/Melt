@@ -76,6 +76,37 @@ def http_get_json(url: str, headers: dict = None, timeout: int = 20,
             time.sleep(_backoff(attempt, None))
 
 
+def http_get_text(url: str, headers: dict = None, timeout: int = 30,
+                  retries: int = MAX_RETRIES) -> str:
+    """Fetch *url* and return its body as text (e.g. a FASTA reply).
+
+    Retries on ``429``/5xx/network errors like the JSON helper.
+    """
+    hdr = {"User-Agent": USER_AGENT}
+    if headers:
+        hdr.update(headers)
+    req = urllib.request.Request(url, headers=hdr)
+
+    attempt = 0
+    while True:
+        _LIMITER.acquire()
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.read().decode("ascii", errors="replace")
+        except urllib.error.HTTPError as exc:
+            if exc.code != 429 and exc.code < 500:
+                raise
+            attempt += 1
+            if attempt >= retries:
+                raise
+            time.sleep(_backoff(attempt, exc.headers.get("Retry-After")))
+        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+            attempt += 1
+            if attempt >= retries:
+                raise
+            time.sleep(_backoff(attempt, None))
+
+
 def http_post(url: str, data: bytes, headers: dict = None, timeout: int = 30,
               retries: int = MAX_RETRIES) -> bytes:
     """POST *data* (form-encoded bytes) and return the response bytes.

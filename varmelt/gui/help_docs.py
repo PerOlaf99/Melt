@@ -43,7 +43,38 @@ HRM analysis package.
 <li><b>Add best of each variant</b> keeps the highest-scoring candidate per variant.</li>
 </ul>
 
-<h3>3. Reading the melt chart</h3>
+<h3>3. Tiling-walk of a long template</h3>
+<p>
+<b>Design → Fragment tiling…</b> (Ctrl+T) covers a long DNA template with
+overlapping amplicons — paste the sequence or fetch a GenBank accession
+(only ACGT is accepted; FASTA headers are skipped, and any IUPAC ambiguity
+codes in a fetched record are resolved to a canonical base and counted).
+Each fragment is a 120–200 bp amplicon (GC clamp included) whose hot-spot
+melt peak stays at or under the <b>Max melt temp</b> cap: warmer template
+windows are cut shorter, monotonic with temperature.
+</p>
+<ul>
+<li><b>Primer rule (default)</b> — consecutive fragments share the
+    primer-protection overlap, so a 1-200 bp fragment is followed by one
+    starting at 159 (159-179 forward / 339-359 reverse).  Every fragment's
+    20-nt primer annealing sites then lie inside a <em>neighbour</em>
+    amplicon, so a mutation in a primer site is still amplified — and
+    detected — by the neighbouring PCR, never lost between fragments.</li>
+<li><b>Circular DNA</b> — tick this for mitochondrial / chloroplast genomes.
+    The walk continues across the origin: the last fragment(s) wrap past
+    base 1 (the table shows a high start with a small folded end, flagged
+    <b>wraps origin</b>) and the seam overlaps like every interior pair, so
+    base 1 is covered twice like any other position.</li>
+<li><b>Add all</b> (or shift-click rows and <b>Add selected</b>) drops the
+    fragments into the project as ordinary amplicons, melt-computed and
+    ready to overlay on the chart; a batch is added on a background thread
+    with a progress bar so the window stays responsive.</li>
+<li><b>Save CSV…</b> writes the tiling report (start, end, length incl.
+    clamp, peak Tm, GC %, flag, template sequence); the wrap fragment's end
+    is shown folded back onto the circle.</li>
+</ul>
+
+<h3>4. Reading the melt chart</h3>
 <ul>
 <li><b>Solid line</b> — reference (wildtype) local Tm along the fragment.</li>
 <li><b>Dashed red</b> — variant allele on the same physical layout.</li>
@@ -52,14 +83,14 @@ HRM analysis package.
     double-click or Reset to show all.</li>
 </ul>
 
-<h3>4. Score (0–100)</h3>
+<h3>5. Score (0–100)</h3>
 <p>
 Dip-free shape, resolvable WT/mut difference, primer Tm near optimum,
 short fragment, and dbSNP-free 3′ ends. Higher is better for CTCE-oriented design;
 always inspect the overlay before ordering oligos.
 </p>
 
-<h3>5. Files</h3>
+<h3>6. Files</h3>
 <ul>
 <li>Projects: <code>*.varmelt.json</code></li>
 <li>Primer table: CSV export from the main window</li>

@@ -38,6 +38,16 @@ without external native dependencies.
   variant; give a local 2bit file for a whole-chromosome scan.
 - Emit an HTML report (SVG overlay of the two melting maps + primer table),
   a TSV table, and a per-base profile file.
+- **Long-template tiling walk** (GUI, Design → Fragment tiling…): cover a
+  pasted sequence or a fetched GenBank accession (e.g. `NC_012920`, human
+  mtDNA) with overlapping 120–200 bp fragments (GC clamp included) whose
+  hot-spot melt peak stays under a configurable cap — warmer template
+  windows are cut shorter.  Consecutive fragments share a primer-protection
+  overlap so every 20-mer primer-annealing site lies inside a neighbour
+  amplicon (a mutation in a primer site is still detected by the
+  neighbouring PCR), and a *circular DNA* mode closes the walk for
+  mitochondrial/chloroplast genomes: the final fragment(s) wrap past base 1
+  and the seam overlaps like every interior pair.
 
 ## Install
 
@@ -131,6 +141,29 @@ opens a saved project on start.
   process (Qt kills a `QThread` that is still running when its parent
   widget is destroyed) — see
   [`docs/non-human-genomes.md`](docs/non-human-genomes.md#closing-the-window-during-a-batch).
+- **Design → Fragment tiling…** (Ctrl+T) covers a long template with
+  overlapping amplicons in one pass.  Paste a sequence, or type a GenBank
+  accession in the *GenBank accession* tab (IUPAC ambiguity codes such as
+  NCBI's lone *N* at mtDNA base 3107 are resolved to a canonical base and
+  counted).  Each row is a 120–200 bp fragment (GC clamp included) kept at
+  or under the **Max melt temp** cap — warmer windows are cut shorter,
+  monotonic with the local melt map.  Fragments overlap by the
+  primer-protection span (default 42 bp, clamped to `2 × primer len + 2`):
+  what reads as a 1-200 bp fragment is followed by one starting at 159, so
+  each fragment's forward/reverse 20-mer primer sites stay *inside* a
+  neighbour amplicon and a variation in a primer site is still amplified
+  (and detected) by the neighbouring PCR instead of being lost between
+  fragments.  Tick **Circular DNA** for mitochondrial / chloroplast
+  genomes (the checkbox is the first row of the form): the walk continues
+  across the origin, the last fragment(s) wrap past base 1 — the table
+  shows a high start with a small folded end, flagged `· wraps origin`, and
+  the seam overlaps like every interior pair so base 1 is covered twice.
+  The results table is sortable; **Add all** / shift-click + **Add
+  selected** drops fragments into the project as ordinary amplicons
+  (melt-computed on a background thread with a progress bar, graphs off for
+  walks larger than 15 fragments), and **Save CSV…** exports the tiling
+  report (start, end, length incl. clamp, peak Tm, GC %, flag, sequence;
+  the wrap fragment's end is folded back onto the circle).
 
 ## Usage
 
@@ -327,6 +360,7 @@ results and what is left to do.
 .venv/bin/python tests/test_fallback.py  # geometry / clamp / fallback design
 .venv/bin/python tests/test_inpcr.py     # seed-and-extend / specificity scan
 .venv/bin/python tests/test_sequence.py  # pasted-amplicon (primers + profiles)
+.venv/bin/python tests/test_tiling.py    # tiling walk / primer protection / wrap
 QT_QPA_PLATFORM=offscreen .venv/bin/python tests/test_gui.py   # desktop GUI
 ```
 

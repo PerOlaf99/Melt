@@ -927,6 +927,138 @@ def test_design_save_load_candidates_roundtrip():
     dlg.close()
 
 
+def test_tiling_circular_wrap_row_is_visible():
+    """A circular walk shows the seam fragment folding back over base 1."""
+    import random
+    from PySide6.QtWidgets import QApplication
+    from varmelt import tiling
+    from varmelt.gui.main import MainWindow
+
+    global failures
+    random.seed(7)
+    app = QApplication.instance() or QApplication([])
+    seq = "".join(random.choice("ACGT") for _ in range(1240))
+    win = MainWindow()
+    win._open_tiling()
+    dlg = win._tiling_dlg
+    dlg.paste_edit.setPlainText(seq)
+    dlg.circular_chk.setChecked(True)
+    dlg._on_design()
+    dlg._thread.wait()
+    app.processEvents()
+    ok(dlg.circular_chk.isChecked(), "circular DNA box was ticked")
+    wraps = [f for f in dlg._frags if f.wraps]
+    ok(wraps and wraps[-1].end > len(seq),
+       "the seam fragment wraps past the origin")
+    last = wraps[-1]
+    ok(last.end - len(seq) >= dlg.overlap_spin.value(),
+       "seam overlap at least the configured overlap span")
+    rows = tiling.fragment_rows(dlg._frags)
+    ok(any(r[0] == last.start and r[1] == last.end_wrapped
+           and "wraps origin" in r[5] for r in rows),
+       "the table shows the seam fragment folding back over base 1")
+    win._add_tiling_fragments([last])
+    win._tiling_add_thread.wait()
+    app.processEvents()
+    ok(any("wraps origin" in it.name for it in win.project.items),
+       "the added item name marks the seam fragment as wrapping")
+    dlg.close()
+
+
+def test_tiling_dialog_designs_and_adds():
+    """The tiling dialog designs a walk and emits addable fragments."""
+    import random
+    from PySide6.QtWidgets import QApplication
+    from varmelt.gui.main import MainWindow
+    from varmelt.gui.tiling import TilingDialog
+
+    global failures
+    random.seed(5)
+    app = QApplication.instance() or QApplication([])
+    seq = "".join(random.choice("ACGT") for _ in range(900))
+    win = MainWindow()
+    win._open_tiling()
+    dlg = win._tiling_dlg
+    ok(isinstance(dlg, TilingDialog), "Tiling menu opens the dialog")
+    win._open_tiling()
+    ok(win._tiling_dlg is dlg, "a second open reuses the dialog instance")
+    dlg.paste_edit.setPlainText(f">test\n{seq}")
+    dlg._on_design()
+    dlg._thread.wait()
+    app.processEvents()
+    ok(bool(dlg._frags), "the walk designed fragments")
+    ok(dlg.table.rowCount() == len(dlg._frags),
+       "every fragment shows in the results table")
+    ok(dlg._frags[-1].end == len(seq), "walk reaches the template end")
+    ok(dlg.add_all_btn.isEnabled() and dlg.csv_btn.isEnabled(),
+       "Add-all and CSV enable once designed")
+    n0 = len(win.project.items)
+    win._add_tiling_fragments(list(dlg._frags))
+    win._tiling_add_thread.wait()
+    app.processEvents()
+    new = win.project.items[n0:]
+    ok(len(new) == len(dlg._frags), "Add-all appends every fragment")
+    ok(all(not it.error for it in new), "tiling items compute without error")
+    ok(all(it.kind == "seq" for it in new), "tiling items are plain amplicons")
+    ok(all(it.plot for it in new), "a normal walk adds with graphs on")
+    ok(all(f"tile {f.start}-{f.end}" in it.name
+           for f, it in zip(dlg._frags, new)),
+       "fragment names carry their template coordinates")
+    dlg.close()
+
+
+def test_tiling_large_walk_adds_graphs_off():
+    """A long template (>15 fragments) is added without flooding the chart."""
+    import random
+    from PySide6.QtWidgets import QApplication
+    from varmelt.gui.main import MainWindow
+
+    random.seed(13)
+    app = QApplication.instance() or QApplication([])
+    seq = "".join(random.choice("ACGT") for _ in range(3200))
+    win = MainWindow()
+    win._open_tiling()
+    dlg = win._tiling_dlg
+    dlg.paste_edit.setPlainText(seq)
+    dlg._on_design()
+    dlg._thread.wait()
+    app.processEvents()
+    ok(len(dlg._frags) > 15, "a 3.2 kb walk yields a large fragment batch")
+    win._add_tiling_fragments(list(dlg._frags))
+    win._tiling_add_thread.wait()
+    app.processEvents()
+    new = win.project.items[len(win.project.items) - len(dlg._frags):]
+    ok(all(not it.plot for it in new),
+       "large-batch fragments arrive with graphs off")
+    ok(all(not it.error for it in new), "large batch computes without error")
+    dlg.close()
+
+
+def test_clear_button_empties_project():
+    """Clear removes every amplicon in one click and resets the counter."""
+    from PySide6.QtWidgets import QApplication, QLabel
+    from varmelt.gui.main import MainWindow
+
+    global failures
+    app = QApplication.instance() or QApplication([])
+    win = MainWindow()
+    for i in range(3):
+        win.project.add(Item(kind="seq", name=f"f{i}", seq=SEQ + f"ACGT{i}",
+                             clamp="5'"))
+    win._refresh_list()
+    ok(win._clear_button.isEnabled(),
+       "Clear is enabled once amplicons exist")
+    win._clear_items()
+    app.processEvents()
+    ok(len(win.project.items) == 0, "Clear empties the project");
+    ok(win.list.count() == 0, "Clear empties the amplicon list")
+    title = win.findChild(QLabel, "listTitle")
+    ok(title is not None and "(0)" in title.text(),
+       "amplicon counter resets to zero")
+    ok(not win._clear_button.isEnabled(),
+       "Clear disables itself for an empty project")
+
+
 if __name__ == "__main__":
     test_model_compute_roundtrip()
     test_project_schema()
@@ -944,6 +1076,10 @@ if __name__ == "__main__":
     test_design_large_batch_adds_untoggled()
     test_design_sorted_selection_maps_to_candidates()
     test_design_save_load_candidates_roundtrip()
+    test_tiling_dialog_designs_and_adds()
+    test_tiling_circular_wrap_row_is_visible()
+    test_tiling_large_walk_adds_graphs_off()
+    test_clear_button_empties_project()
     test_buttons_and_table()
     print("\n" + ("ALL GUI TESTS PASSED" if failures == 0
                   else f"{failures} FAILURE(S)"))
