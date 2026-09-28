@@ -100,10 +100,10 @@ def test_chart_renders_png():
     ok(ch._datasets[0]["color"] != ch._datasets[1]["color"],
        "each item gets its own line colour")
     ok(win._csv_row(win.project.items[1])
-       and win._csv_row(win.project.items[1])[0] == "frag_pair",
+       and win._csv_row(win.project.items[1])[1] == "frag_pair",
        "csv row for pair")
     row = win._csv_row(win.project.items[1])
-    ok(row[6] == 0 and row[7] == 79 and row[8] == 80 + len(GC_CLAMP),
+    ok(row[7] == 0 and row[8] == 79 and row[9] == 80 + len(GC_CLAMP),
        "product coords + fragment length incl. the 3' GC clamp in csv")
 
 # physical-fragment axis: base 1 is always the left edge; the clamp
@@ -231,28 +231,31 @@ def test_chart_renders_png():
     # the primer table lists every computed fragment, not just the selected
     win._render_table()
     ok(win.table.rowCount() == 2, "primer table row per computed item")
-    ok(win.table.columnCount() == 12,
-       "primer table carries a separation (delta-area) column")
-    # rows are sorted by the last header click, so find each amplicon by name
-    cell = win.table.item(0, 0).text()
+    ok(win.table.columnCount() == 13,
+       "primer table carries a # + separation (delta-area) column")
+    # find each amplicon by name (col 0 = #, col 1 = name)
+    cell = win.table.item(0, 1).text()
     seq_row = 0 if cell == "frag" else 1
     pair_row = 1 - seq_row
-    ok(win.table.item(seq_row, 0).text() == "frag"
-       and win.table.item(pair_row, 0).text() == "frag_pair",
-       "amplicon names in the first column")
-    ok(win.table.item(seq_row, 1).text() == SEQ[:20],
+    ok(win.table.item(seq_row, 0).text() == "1"
+       and win.table.item(pair_row, 0).text() == "2",
+       "table # matches the numbered amplicon list")
+    ok(win.table.item(seq_row, 1).text() == "frag"
+       and win.table.item(pair_row, 1).text() == "frag_pair",
+       "amplicon names in the column after #")
+    ok(win.table.item(seq_row, 2).text() == SEQ[:20],
        "forward primer still the bare 20-mer")
-    ok(win.table.item(pair_row, 7).text() == str(80 + len(GC_CLAMP)),
+    ok(win.table.item(pair_row, 8).text() == str(80 + len(GC_CLAMP)),
        "pair column: fragment length includes the 3' GC clamp")
-    ok(win.table.item(seq_row, 7).text() == str(80 + len(GC_CLAMP)),
+    ok(win.table.item(seq_row, 8).text() == str(80 + len(GC_CLAMP)),
        "seq column: fragment length includes the 5' GC clamp")
-    ok(float(win.table.item(pair_row, 9).text()) > 0,
+    ok(float(win.table.item(pair_row, 10).text()) > 0,
        "pair delta area is a positive number")
-    ok(win.table.item(pair_row, 11).text() in ("flat/slope ok", "n/a")
-       or win.table.item(pair_row, 11).text().startswith("dip"),
+    ok(win.table.item(pair_row, 12).text() in ("flat/slope ok", "n/a")
+       or win.table.item(pair_row, 12).text().startswith("dip"),
        "pair melting shape is reported")
-    ok(win._csv_row(win.project.items[1])[10]
-       == win.table.item(pair_row, 9).text(),
+    ok(win._csv_row(win.project.items[1])[11]
+       == win.table.item(pair_row, 10).text(),
        "csv delta area matches the table cell")
 
     # untick the pair -> a single dataset remains
@@ -426,7 +429,7 @@ def test_buttons_and_table():
             & (QAbstractItemView.DoubleClicked
                | QAbstractItemView.EditKeyPressed)),
        "primer table cells are editable")
-    ok(win.table.item(0, 1).text() == SEQ[:20],
+    ok(win.table.item(0, 2).text() == SEQ[:20],
        "table shows the bare forward primer")
     text = win._copy_table()
     ok(text is not None and "Forward primer" in text
@@ -434,9 +437,9 @@ def test_buttons_and_table():
        "copy returns the header + primer row")
 
     # manual edit to a cell is not clobbered by the next render
-    win.table.setItem(0, 1, QTableWidgetItem("CUSTOM-RP"))
+    win.table.setItem(0, 2, QTableWidgetItem("CUSTOM-RP"))
     win._render_table()
-    ok(win.table.item(0, 1).text() == SEQ[:20],
+    ok(win.table.item(0, 2).text() == SEQ[:20],
        "render refreshes primers for the current item")
 
 
@@ -1059,6 +1062,129 @@ def test_clear_button_empties_project():
        "Clear disables itself for an empty project")
 
 
+def test_list_numbering_filter_and_table_link():
+    """Amplicon list is numbered, filterable by name, and linked to the
+    primer table via a shared # (selecting a list row highlights its table
+    row; double-clicking a table row jumps back to the list)."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+    from varmelt.gui.main import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    win = MainWindow()
+    names = ["chr14:99183681 C>A", "BRAF V600E", "tile 1-158"]
+    for n in names:
+        win.project.add(Item(kind="seq", name=n, seq=SEQ, clamp="5'"))
+    for it in win.project.items:
+        it.compute(win.project.na)
+    win._refresh_list()
+    win._render_table()
+
+    ok(win.list.count() == 3, "three amplicons listed")
+    ok(win.list.item(0).text().startswith("1.")
+       and "chr14:99183681 C>A" in win.list.item(0).text(),
+       "first list row carries its shared # and name")
+    ok(win.list.item(2).text().startswith("3."), "third list row is #3")
+    ok(win.table.rowCount() == 3, "computed amplicons all in the table")
+    ok(win.table.item(2, 0).text() == "3"
+       and "tile 1-158" in win.table.item(2, 1).text(),
+       "table # matches the list # for the third amplicon")
+
+    win.filter_edit.setText("chr14")
+    app.processEvents()
+    hidden = [r for r in range(win.list.count())
+              if win.list.item(r).isHidden()]
+    ok(hidden == [1, 2], "name filter shows only the chr14 amplicon")
+    win.filter_edit.clear()
+    app.processEvents()
+    ok(not any(win.list.item(r).isHidden() for r in range(3)),
+       "clearing the filter restores every row")
+
+    win.list.setCurrentRow(2)
+    app.processEvents()
+    sel = win.table.selectedItems()
+    ok(sel and win.table.item(sel[0].row(), 0).text() == "3",
+       "selecting a list row highlights its # 3 table row")
+
+    win.list.setCurrentRow(0)
+    app.processEvents()
+    win._on_table_row_activated(win.table.item(1, 0))
+    app.processEvents()
+    ok(win.list.currentRow() == 1 and "BRAF V600E"
+       in win.list.currentItem().text(),
+       "double-clicking a table row jumps to that amplicon in the list")
+
+
+def test_settings_dialog_roundtrip():
+    """The Settings dialog persists Primer3 + melting-model values, and
+    Reset-to-defaults restores and stores the development defaults."""
+    from PySide6.QtWidgets import QApplication
+    from varmelt.gui import app_settings as as_
+
+    app = QApplication.instance() or QApplication([])
+    as_.set_values(**as_.DEFAULTS)
+    ok(as_.current() == as_.DEFAULTS, "fresh settings match the defaults")
+
+    dlg = as_.SettingsDialog()
+    dlg._spins["tm_opt"][0].setValue(58.0)
+    dlg._spins["tm_min"][0].setValue(48.0)
+    dlg._spins["tm_max"][0].setValue(65.0)
+    dlg._spins["na"][0].setValue(0.02)
+    dlg._spins["max_frag"][0].setValue(300)
+    dlg._on_ok()
+    after = as_.current()
+    ok(after["tm_opt"] == 58.0 and after["tm_min"] == 48.0
+       and after["tm_max"] == 65.0, "primer Tm range persists from the dialog")
+    ok(after["na"] == 0.02 and after["max_frag"] == 300,
+       "melting-map defaults persist from the dialog")
+
+    dlg2 = as_.SettingsDialog()
+    dlg2._load_defaults()
+    dlg2._on_ok()
+    ok(as_.current() == as_.DEFAULTS,
+       "reset-to-defaults restores and stores the defaults")
+
+    # restore defaults so later tests see a clean store
+    as_.set_values(**as_.DEFAULTS)
+
+
+def test_design_dialog_uses_settings():
+    """Settings feed the main-window Na+ default and the design dialog's
+    Primer3 parameters, which it passes into design_variant."""
+    from PySide6.QtWidgets import QApplication
+    from varmelt.gui import app_settings as as_
+    from varmelt.gui.main import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    as_.set_values(na=0.02, max_frag=300, tm_opt=58.0, tm_min=48.0,
+                   tm_max=65.0, size_opt=21, size_min=19, size_max=25,
+                   salt_mm=75.0)
+
+    win = MainWindow()
+    ok(abs(win.na_spin.value() - 0.02) < 1e-6,
+       "main-window Na+ default follows the setting")
+
+    win._open_design()
+    dlg = win._design_dlg
+    ok(abs(dlg.na_spin.value() - 0.02) < 1e-6
+       and dlg.maxfrag_spin.value() == 300,
+       "design dialog inherits Na+ and fragment-length settings")
+    base = dlg._base()
+    ok(base["opt_tm"] == 58.0 and base["min_tm"] == 48.0
+       and base["max_tm"] == 65.0,
+       "design dialog passes the annealing-Tm range to the engine")
+    ok(base["opt_size"] == 21 and base["min_size"] == 19
+       and base["max_size"] == 25 and base["salt_mm"] == 75.0,
+       "design dialog passes primer length + salt to the engine")
+
+    win._open_tiling()
+    tdlg = win._tiling_dlg
+    ok(abs(tdlg.na_spin.value() - 0.02) < 1e-6,
+       "tiling dialog inherits the Na+ setting")
+
+    as_.set_values(**as_.DEFAULTS)
+
+
 if __name__ == "__main__":
     test_model_compute_roundtrip()
     test_project_schema()
@@ -1080,6 +1206,9 @@ if __name__ == "__main__":
     test_tiling_circular_wrap_row_is_visible()
     test_tiling_large_walk_adds_graphs_off()
     test_clear_button_empties_project()
+    test_settings_dialog_roundtrip()
+    test_design_dialog_uses_settings()
+    test_list_numbering_filter_and_table_link()
     test_buttons_and_table()
     print("\n" + ("ALL GUI TESTS PASSED" if failures == 0
                   else f"{failures} FAILURE(S)"))

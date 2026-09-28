@@ -106,6 +106,11 @@ opens a saved project on start.
 - The **primer table** under the chart is editable in place and has a
   ``Copy`` button (tab-separated) and a ``Save CSV…`` button, so a chosen
   set can be tweaked and exported for the lab bench.
+- **Settings → Primer design settings…** controls the Primer3 parameters —
+  optimal/min/max annealing Tm (defaults 60/46/67 °C), primer length,
+  salt concentration — plus the app-wide melting defaults (Na+, max
+  fragment length).  Values persist between sessions and feed the next
+  design/tiling run (the CLI equivalents are ``--tm-opt/min/max``).
 - File menu: New / Open / Save / Save As (`*.varmelt.json`), export the
   chart image as PNG and all primer sets as CSV.  Projects store the pasted
   sequences and settings only; profiles are recomputed from the engine on

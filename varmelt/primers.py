@@ -117,7 +117,9 @@ def _variant_inside(amp_start: int, amp_end: int,
 def _build_seq_args(seq_lower: str, ranges, var_pos: int = None,
                     excl_pad: int = 4, opt_tm: float = PRIMER_OPT_TM,
                     min_tm: float = PRIMER_MIN_TM,
-                    max_tm: float = PRIMER_MAX_TM) -> dict:
+                    max_tm: float = PRIMER_MAX_TM,
+                    opt_size: int = 20, min_size: int = 18,
+                    max_size: int = 23) -> dict:
     args = {
         "SEQUENCE_ID": "amplicon",
         "SEQUENCE_TEMPLATE": seq_lower,
@@ -142,9 +144,9 @@ def _build_seq_args(seq_lower: str, ranges, var_pos: int = None,
         "PRIMER_TASK": "generic",
         "PRIMER_PICK_LEFT_PRIMER": 1,
         "PRIMER_PICK_RIGHT_PRIMER": 1,
-        "PRIMER_OPT_SIZE": 20,
-        "PRIMER_MIN_SIZE": 18,
-        "PRIMER_MAX_SIZE": 23,
+        "PRIMER_OPT_SIZE": opt_size,
+        "PRIMER_MIN_SIZE": min_size,
+        "PRIMER_MAX_SIZE": max_size,
         "PRIMER_OPT_TM": opt_tm,
         "PRIMER_MIN_TM": min_tm,
         "PRIMER_MAX_TM": max_tm,
@@ -160,10 +162,10 @@ def _build_seq_args(seq_lower: str, ranges, var_pos: int = None,
     return args
 
 
-def _global_args() -> dict:
+def _global_args(salt_mm: float = 50.0) -> dict:
     return {
         "PRIMER_DNA_CONC": 50.0,
-        "PRIMER_SALT_CONC": 50.0,
+        "PRIMER_SALT_CONC": salt_mm,
         "PRIMER_SALT_DIVALENT": 0.0,
     }
 
@@ -172,7 +174,9 @@ def design(seq: str, chrom: str = "", var_pos: int = None,
            ranges=None, max_frag: int = MAX_FRAG_LENGTH,
            na: float = 0.013, opt_tm: float = PRIMER_OPT_TM,
            min_tm: float = PRIMER_MIN_TM,
-           max_tm: float = PRIMER_MAX_TM) -> List[PrimerResult]:
+           max_tm: float = PRIMER_MAX_TM,
+           opt_size: int = 20, min_size: int = 18,
+           max_size: int = 23, salt_mm: float = 50.0) -> List[PrimerResult]:
     """Run Primer3 once per product-size window (*ranges*).
 
     Returns up to ``_P3_NUM_CANDIDATES`` ranked candidate pairs per range
@@ -210,10 +214,12 @@ def design(seq: str, chrom: str = "", var_pos: int = None,
         seq_args = _build_seq_args(seq.lower(), [(lo, hi)],
                                    var_pos=var_pos,
                                    opt_tm=opt_tm, min_tm=min_tm,
-                                   max_tm=max_tm)
+                                   max_tm=max_tm,
+                                   opt_size=opt_size, min_size=min_size,
+                                   max_size=max_size)
         with _PRIMER3_LOCK:
             with _numeric_c_locale():
-                res = bindings.design_primers(seq_args, _global_args())
+                res = bindings.design_primers(seq_args, _global_args(salt_mm))
         for ci in range(_P3_NUM_CANDIDATES):
             left = res.get(f"PRIMER_LEFT_{ci}")
             right = res.get(f"PRIMER_RIGHT_{ci}")

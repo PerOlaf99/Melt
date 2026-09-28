@@ -24,10 +24,19 @@ HRM analysis package.
 <ol>
 <li><b>Add sequences</b> or a <b>wildtype / mutant pair</b> (left panel buttons),
     or open <b>Design…</b> to build candidates from an rsID or genomic position.</li>
-<li>Tick amplicons in the list to overlay their melt maps on the chart.</li>
+<li>Tick amplicons in the list to overlay their melt maps on the chart.
+    Rows are numbered <b>1, 2, 3, …</b> — the same # starts each row of the
+    primer table on the right. Type in the <i>filter amplicons</i> box to
+    show only matching names (e.g. <code>chr14:99183681</code>); select a
+    list row to highlight its table row, or double-click a table row to jump
+    to its amplicon in the list.</li>
 <li>Adjust <b>Na+</b> and clamp if needed; the map recomputes automatically.</li>
 <li>Compare solid (reference) vs dashed (variant) curves; prefer pairs with a
     clear temperature separation and a clean slope after the GC clamp.</li>
+<li><b>Settings → Primer design settings…</b> changes the DNA-diagnostic
+    parameters: the Primer3 annealing-Tm range (optimal / min / max Tx),
+    primer length, salt concentration, and the app-wide defaults for Na+
+    and the fragment-length cap. The next design / tiling run uses them.</li>
 <li><b>Export</b> primers (CSV) or chart image for the lab notebook / oligo order.</li>
 </ol>
 
@@ -41,6 +50,11 @@ HRM analysis package.
 <li><b>Multi-select</b>: Ctrl+click to toggle rows, Shift+click for a range,
     then <b>Add selected</b>. Double-click adds one row.</li>
 <li><b>Add best of each variant</b> keeps the highest-scoring candidate per variant.</li>
+<li>The annealing-Tm targets found by Primer3 come from <b>Settings →
+    Primer design settings…</b>: optimal / min / max Tx (defaults
+    60 / 46 / 67 °C, loosened so AT-rich regions still find binding sites),
+    primer length and salt. The score rewards candidate pairs whose primer Tm
+    sits in that range.</li>
 </ul>
 
 <h3>3. Tiling-walk of a long template</h3>
@@ -68,7 +82,9 @@ windows are cut shorter, monotonic with temperature.
 <li><b>Add all</b> (or shift-click rows and <b>Add selected</b>) drops the
     fragments into the project as ordinary amplicons, melt-computed and
     ready to overlay on the chart; a batch is added on a background thread
-    with a progress bar so the window stays responsive.</li>
+    with a progress bar so the window stays responsive. The walk is long, so
+    use the <i>filter amplicons</i> box or the shared # to find a given
+    fragment (see §1).</li>
 <li><b>Save CSV…</b> writes the tiling report (start, end, length incl.
     clamp, peak Tm, GC %, flag, template sequence); the wrap fragment's end
     is shown folded back onto the circle.</li>

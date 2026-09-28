@@ -13,7 +13,7 @@ from .. import cli
 from .. import primers as pr
 
 APP_NAME = "MeltScope"
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.3.1"
 SCHEMA_VERSION = 1
 CLAMP_SIDES = ["5'", "3'", "none"]
 

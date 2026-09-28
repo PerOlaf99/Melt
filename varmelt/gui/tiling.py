@@ -163,7 +163,8 @@ class TilingDialog(QDialog):
         self.na_spin.setRange(0.001, 1.0)
         self.na_spin.setDecimals(3)
         self.na_spin.setSingleStep(0.001)
-        self.na_spin.setValue(0.013)
+        from .app_settings import current as load_settings
+        self.na_spin.setValue(load_settings()["na"])
         form.addRow("Na+ (M)", self.na_spin)
 
         self.maxfrag_spin = QSpinBox()

@@ -215,6 +215,10 @@ class DesignDialog(QDialog):
         self.maxfrag_spin.setRange(100, 500)
         self.maxfrag_spin.setValue(240)
         form.addRow("Max fragment (bp)", self.maxfrag_spin)
+        self._primer_tm = (60.0, 46.0, 67.0)
+        self._primer_size = (20, 18, 23)
+        self._primer_salt = 50.0
+        self.refresh_settings()
 
         self.hint = QLabel(SPEC_HINT)
         self.hint.setWordWrap(True)
@@ -352,10 +356,36 @@ class DesignDialog(QDialog):
         """The build as typed (the combo is editable, so not a fixed item)."""
         return self.genome_combo.currentText().strip()
 
+    def refresh_settings(self):
+        """Reload the saved Primer3 / melting-model settings (Settings… menu).
+
+        Called at construction and again each time the dialog is re-shown so
+        a change in Settings… is picked up without reopening the dialog.
+        """
+        from .app_settings import current as load_settings
+        cfg = load_settings()
+        self.na_spin.blockSignals(True)
+        self.na_spin.setValue(cfg["na"])
+        self.na_spin.blockSignals(False)
+        self.maxfrag_spin.blockSignals(True)
+        self.maxfrag_spin.setValue(cfg["max_frag"])
+        self.maxfrag_spin.blockSignals(False)
+        self._primer_tm = (cfg["tm_opt"], cfg["tm_min"], cfg["tm_max"])
+        self._primer_size = (cfg["size_opt"], cfg["size_min"],
+                             cfg["size_max"])
+        self._primer_salt = cfg["salt_mm"]
+
     def _base(self) -> dict:
         return {"genome": self._genome_name(),
                 "na": self.na_spin.value(),
-                "max_frag": self.maxfrag_spin.value()}
+                "max_frag": self.maxfrag_spin.value(),
+                "opt_tm": self._primer_tm[0],
+                "min_tm": self._primer_tm[1],
+                "max_tm": self._primer_tm[2],
+                "opt_size": self._primer_size[0],
+                "min_size": self._primer_size[1],
+                "max_size": self._primer_size[2],
+                "salt_mm": self._primer_salt}
 
     def _on_design(self):
         from ..dbsnp import is_human_assembly

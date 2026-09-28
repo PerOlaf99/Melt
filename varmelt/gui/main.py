@@ -6,11 +6,11 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QGuiApplication
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox,
                                QDoubleSpinBox, QFileDialog, QHeaderView,
-                               QHBoxLayout, QInputDialog, QLabel, QListWidget,
-                               QListWidgetItem, QMainWindow, QMenu,
-                               QMessageBox, QProgressDialog, QPushButton,
-                               QSizePolicy, QSplitter, QTableWidget,
-                               QVBoxLayout, QWidget)
+                               QHBoxLayout, QInputDialog, QLabel,
+                               QLineEdit, QListWidget, QListWidgetItem,
+                               QMainWindow, QMenu, QMessageBox,
+                               QProgressDialog, QPushButton, QSizePolicy,
+                               QSplitter, QTableWidget, QVBoxLayout, QWidget)
 
 from .. import cli, webapp
 from .design import SortableItem
@@ -94,7 +94,7 @@ def apply_dark_theme(app):
 
 _SUPPORTED = [("varmelt project (*.varmelt.json)", "*.varmelt.json"),
               ("JSON files (*.json)", "*.json")]
-_CSV_HEAD = ["name", "kind", "forward primer", "reverse primer",
+_CSV_HEAD = ["#", "name", "kind", "forward primer", "reverse primer",
              "fwd tm", "rev tm", "product start", "product end",
              "length", "mean tm", "delta area", "gc clamp", "melting shape"]
 
@@ -132,6 +132,14 @@ class MainWindow(QMainWindow):
         L.setObjectName("listTitle")
         L.setToolTip("Number of amplicons in the project")
         lay.addWidget(L)
+        self.filter_edit = QLineEdit()
+        self.filter_edit.setPlaceholderText("filter amplicons by name…")
+        self.filter_edit.setClearButtonEnabled(True)
+        self.filter_edit.setToolTip(
+            "Type to show only amplicons whose name matches. The row number "
+            "is the same shared # as the primer table.")
+        self.filter_edit.textChanged.connect(self._apply_filter)
+        lay.addWidget(self.filter_edit)
         self.list = QListWidget()
         self.list.itemSelectionChanged.connect(self._on_select)
         self.list.itemDoubleClicked.connect(lambda _: self._rename_item())
@@ -206,7 +214,8 @@ class MainWindow(QMainWindow):
         self.na_spin.setRange(0.001, 1.0)
         self.na_spin.setDecimals(3)
         self.na_spin.setSingleStep(0.001)
-        self.na_spin.setValue(0.013)
+        from .app_settings import current as load_settings
+        self.na_spin.setValue(load_settings()["na"])
         self.na_spin.valueChanged.connect(self._na_changed)
         top.addWidget(self.na_spin)
 
@@ -270,19 +279,23 @@ class MainWindow(QMainWindow):
         header.addWidget(b_csv)
         rlay.addLayout(header)
 
-        self.table = QTableWidget(0, 12)
+        self.table = QTableWidget(0, 13)
         self.table.setHorizontalHeaderLabels(
-            ["Amplicon", "Forward primer", "Reverse primer", "Fwd Tm",
+            ["#", "Amplicon", "Forward primer", "Reverse primer", "Fwd Tm",
              "Rev Tm", "Product start", "Product end", "Length (bp)",
              "Mean Tm", "Δarea (°C·bp)", "GC clamp", "Melting shape"])
         self.table.setToolTip(
             "First/last 20 bases of each predicted primer. Edit manually, "
-            "then Copy or Save CSV for your oligo order.")
+            "then Copy or Save CSV for your oligo order. The # column "
+            "matches the numbered amplicon list; double-click a row to jump "
+            "to its amplicon.")
         _HDR_TIPS = {
+            "#": "Row number, matching the numbered amplicon list on the "
+                 "left (double-click a row to jump to its amplicon).",
             "Fwd Tm": "Predicted melting temperature (°C) of the forward "
-                      "primer (WinMelt model, no GC clamp).",
+                       "primer (WinMelt model, no GC clamp).",
             "Rev Tm": "Predicted melting temperature (°C) of the reverse "
-                      "primer (WinMelt model, no GC clamp).",
+                       "primer (WinMelt model, no GC clamp).",
             "Mean Tm": "Average local melting temperature (°C) over the "
                        "fragment; useful for quick Tm comparison.",
             "Δarea (°C·bp)": "Area between the reference and variant melt "
@@ -308,11 +321,15 @@ class MainWindow(QMainWindow):
                                    | QAbstractItemView.EditKeyPressed)
         head = self.table.horizontalHeader()
         head.setSectionResizeMode(QHeaderView.Interactive)
-        for c in (1, 2):
+        for c in (2, 3):
             head.setSectionResizeMode(c, QHeaderView.Stretch)
         head.setMinimumSectionSize(70)
         head.setSortIndicatorShown(True)
+        self._table_sort = None
+        head.sortIndicatorChanged.connect(
+            lambda sec, order: setattr(self, "_table_sort", (sec, order)))
         self.table.setSortingEnabled(True)
+        self.table.itemDoubleClicked.connect(self._on_table_row_activated)
         rlay.addWidget(self.table)
 
         splitter.addWidget(right)
@@ -357,6 +374,14 @@ class MainWindow(QMainWindow):
                          self._load_example_braf_v600e)
         self._add_action(m_exp, "BRAF silent T->A (dTm ~ 0)",
                          self._load_example_braf_silent)
+
+        m_set = self.menuBar().addMenu("S&ettings")
+        self._add_action(m_set, "Primer design settings…",
+                         self._open_settings,
+                         tip="Change the Primer3 annealing-Tm range, primer "
+                             "length, salt, and the melting-model defaults "
+                             "(Na+, max fragment). Applied the next time "
+                             "fragment design / tiling runs.")
 
         m_help = self.menuBar().addMenu("&Help")
         self._add_action(m_help, "&User manual…", self._user_manual, "F1",
@@ -446,9 +471,15 @@ class MainWindow(QMainWindow):
             dlg.candidate.connect(self._add_designed)
             dlg.candidates.connect(self._add_designed_many)
             self._design_dlg = dlg
+        dlg.refresh_settings()
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()
+
+    def _open_settings(self):
+        from .app_settings import SettingsDialog
+        dlg = SettingsDialog(self)
+        dlg.exec()
 
     def _open_tiling(self):
         """Open the fragment-tiling dialog (one instance, stays open)."""
@@ -832,8 +863,21 @@ class MainWindow(QMainWindow):
         self.path = p
         self.na_spin.setValue(self.project.na)
         self.clamp_combo.setCurrentIndex(0)
-        for it in self.project.items:
+        count = len(self.project.items)
+        dlg = QProgressDialog("Rebuilding melt maps…", "Cancel", 0, count,
+                              self)
+        dlg.setWindowTitle("MeltScope")
+        dlg.setWindowModality(Qt.WindowModal)
+        dlg.setMinimumDuration(400)    # waits before the dialog shows
+        dlg.setAutoClose(True)
+        dlg.setValue(0)
+        for i, it in enumerate(self.project.items):
+            if dlg.wasCanceled():
+                break
             it.compute(self.project.na)
+            dlg.setValue(i + 1)
+            QGuiApplication.processEvents()
+        dlg.close()
         self._refresh_list()
         self._render_plots()
         self._render_table()
@@ -889,7 +933,7 @@ class MainWindow(QMainWindow):
             return None
         pair = it.pair()
         r = it.result
-        return [it.name, it.kind_label(),
+        return [self.project.items.index(it) + 1, it.name, it.kind_label(),
                 r.get("fp") or (pair.fp_seq if pair else ""),
                 r.get("rp") or (pair.rp_seq if pair else ""),
                 f"{pair.fp_tm_melt:.2f}" if pair and pair.fp_tm_melt else "",
@@ -910,10 +954,6 @@ class MainWindow(QMainWindow):
             return self.project.items[i]
         return None
 
-    def _select_index(self, i: int):
-        self.list.setCurrentRow(i)
-        self._update_action_buttons()
-
     def _update_action_buttons(self):
         enabled = self._current_item() is not None
         for b in (self._edit_button, self._dup_button, self._del_button):
@@ -930,8 +970,8 @@ class MainWindow(QMainWindow):
         self.list.blockSignals(True)
         try:
             self.list.clear()
-            for it in self.project.items:
-                label = it.name
+            for i, it in enumerate(self.project.items):
+                label = f"{i + 1}.  {it.name}"
                 if it.error:
                     label += "  [error]"
                 elif it.result:
@@ -957,6 +997,38 @@ class MainWindow(QMainWindow):
                         break
         finally:
             self.list.blockSignals(False)
+        self._apply_filter()
+        self._update_action_buttons()
+
+    def _apply_filter(self):
+        t = self.filter_edit.text().strip().casefold()
+        for r in range(self.list.count()):
+            item = self.list.item(r)
+            it = item.data(Qt.UserRole)
+            show = (not t) or (it is not None
+                               and t in (it.name or "").casefold())
+            item.setHidden(not show)
+
+    def _list_item_for(self, it, want="table"):
+        """Find the index of *it* in the amplicon list / primer table, or -1."""
+        if it is None:
+            return -1
+        if want == "list":
+            for r in range(self.list.count()):
+                if self.list.item(r).data(Qt.UserRole) is it:
+                    return r
+        else:
+            for r in range(self.table.rowCount()):
+                cell = self.table.item(r, 0)
+                if cell is not None and \
+                        cell.data(Qt.UserRole + 9) is it:
+                    return r
+        return -1
+
+    def _select_index(self, i):
+        self.list.setCurrentRow(i)
+        if 0 <= i < self.list.count():
+            self.list.scrollToItem(self.list.item(i))
         self._update_action_buttons()
 
     def _on_item_changed(self, item):
@@ -989,6 +1061,30 @@ class MainWindow(QMainWindow):
         self._update_action_buttons()
         self._sync_controls_from_item()
         self._recompute_current()
+        self._highlight_table_row()
+
+    def _highlight_table_row(self):
+        """Keep the primer table showing the row that belongs to the
+        currently selected amplicon in the list."""
+        it = self._current_item()
+        where = self._list_item_for(it, want="table")
+        self.table.blockSignals(True)
+        self.table.clearSelection()
+        if where >= 0:
+            self.table.selectRow(where)
+            self.table.scrollToItem(self.table.item(where, 0))
+        self.table.blockSignals(False)
+
+    def _on_table_row_activated(self, item):
+        """Double-clicking a primer-table row jumps to its amplicon in the
+        numbered list on the left."""
+        cell = self.table.item(item.row(), 0)
+        it = cell.data(Qt.UserRole + 9) if cell is not None else None
+        if it is None:
+            return
+        where = self._list_item_for(it, want="list")
+        if where >= 0:
+            self._select_index(where)
 
     def _sync_controls_from_item(self):
         it = self._current_item()
@@ -1093,14 +1189,15 @@ class MainWindow(QMainWindow):
                 if it.result and not it.error]
         self.table.setSortingEnabled(False)
         self.table.setRowCount(len(rows))
-        numeric_cols = {3, 4, 5, 6, 7, 8, 9}   # Tm, start/end, length, Δarea
+        numeric_cols = {0, 4, 5, 6, 7, 8, 9, 10}   # #, Tm, start/end, len, Δarea
         for r, it in enumerate(rows):
             pair = it.pair()
             res = it.result
             pairwise = bool(res.get("paired"))
             fp_raw = res.get("fp") or (pair.fp_seq if pair else "")
             rp_raw = res.get("rp") or (pair.rp_seq if pair else "")
-            cols = [it.name, fp_raw, rp_raw,
+            no = self.project.items.index(it) + 1    # shared list number
+            cols = [str(no), it.name, fp_raw, rp_raw,
                     f"{pair.fp_tm_melt:.2f}" if pair and pair.fp_tm_melt
                     else "",
                     f"{pair.rp_tm_melt:.2f}" if pair and pair.rp_tm_melt
@@ -1127,7 +1224,12 @@ class MainWindow(QMainWindow):
                     except (TypeError, ValueError):
                         pass
                 self.table.setItem(r, c, item)
+            self.table.item(r, 0).setData(Qt.UserRole + 9, it)
         self.table.setSortingEnabled(True)
+        sec, order = self._table_sort or (0, Qt.AscendingOrder)
+        if sec >= 0:
+            self.table.sortItems(sec, order)
+        self.table.horizontalHeader().setSortIndicator(sec, order)
 
     def _user_manual(self):
         """Show the built-in HTML user manual (Help → User manual / F1)."""
@@ -1158,9 +1260,8 @@ class MainWindow(QMainWindow):
                           "(varmelt.reference).")
 
     def _update_title(self):
-        base = os.path.basename(self.path) if self.path else "untitled"
         self.setWindowTitle(
-            f"MeltScope v{APP_VERSION} — CTCE variant melting design — {base}")
+            f"MeltScope v{APP_VERSION} — CTCE variant melting design")
 
     def closeEvent(self, event):                    # noqa: N802
         self._debounce.stop()

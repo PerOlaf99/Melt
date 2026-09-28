@@ -227,6 +227,8 @@ def design_variant(rsid: Optional[str] = None, chrom: str = "ref",
                    opt_tm: float = pr.PRIMER_OPT_TM,
                    min_tm: float = pr.PRIMER_MIN_TM,
                    max_tm: float = pr.PRIMER_MAX_TM,
+                   opt_size: int = 20, min_size: int = 18,
+                   max_size: int = 23, salt_mm: float = 50.0,
                    with_dbsnp: bool = True,
                    refseq_override: Optional[str] = None) -> DesignResult:
     """Design candidates for one variant and return them ranked.
@@ -288,7 +290,9 @@ def design_variant(rsid: Optional[str] = None, chrom: str = "ref",
 
     pairs = pr.design(refseq, chrom=chrom_n, var_pos=idx, ranges=ranges,
                       na=na, max_frag=max_frag, opt_tm=opt_tm,
-                      min_tm=min_tm, max_tm=max_tm)
+                      min_tm=min_tm, max_tm=max_tm,
+                      opt_size=opt_size, min_size=min_size,
+                      max_size=max_size, salt_mm=salt_mm)
     fallback = not pairs
     if fallback:
         pairs = pr.design_fallback(refseq, chrom_n, idx, na=na,
