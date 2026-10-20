@@ -351,6 +351,8 @@ class MainWindow(QMainWindow):
                          tip="Save the current melt-map chart as a PNG image")
         self._add_action(m_file, "Export primers (CSV)…", self._export_csv,
                          tip="Save the primer-set table as a CSV file")
+        self._add_action(m_file, "Save sequences…", self._save_sequences,
+                         tip="Save the DNA sequences of ticked amplicons as FASTA or TSV")
         m_file.addSeparator()
         self._add_action(m_file, "&Quit", self.close, "Ctrl+Q",
                          "Close MeltScope")
@@ -927,6 +929,59 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"primers saved {p}", 3000)
         except OSError as exc:
             QMessageBox.critical(self, "MeltScope", str(exc))
+
+    def _save_sequences(self):
+        """Save the DNA sequences of all ticked amplicons."""
+        selected = [it for it in self.project.items if it.plot and (it.seq or it.wt or it.mut)]
+        if not selected:
+            QMessageBox.information(self, "MeltScope",
+                                    "no ticked amplicons with sequence data")
+            return
+
+        p, _ = QFileDialog.getSaveFileName(self, "Save sequences",
+                                           "sequences.fasta",
+                                           "FASTA (*.fasta *.fa);;TSV (*.tsv);;CSV (*.csv)")
+        if not p:
+            return
+
+        # Helper to get the sequence for an item
+        def get_sequence(it: Item) -> str:
+            if it.seq:
+                return it.seq
+            elif it.kind == "pair" and (it.wt or it.mut):
+                # return the longer of wt/mut, or concatenate
+                return it.wt or it.mut or ""
+            return ""
+
+        # Decide format from extension
+        ext = p.lower().split(".")[-1]
+        ok = True
+        try:
+            with open(p, "w", encoding="utf-8") as fh:
+                if ext in ("fasta", "fa"):
+                    for it in selected:
+                        name = it.name.replace("\n", " ").replace("\r", "")
+                        seq = get_sequence(it).upper()
+                        if seq:
+                            fh.write(f">{name}\n{seq}\n")
+                elif ext == "tsv":
+                    for it in selected:
+                        name = it.name.replace("\n", " ").replace("\r", "")
+                        seq = get_sequence(it).upper()
+                        if seq:
+                            fh.write(f"{name}\t{seq}\n")
+                else:  # csv
+                    for it in selected:
+                        name = it.name.replace("\n", " ").replace("\r", "")
+                        seq = get_sequence(it).upper()
+                        if seq:
+                            fh.write(f"{name},{seq}\n")
+        except OSError as exc:
+            ok = False
+            QMessageBox.critical(self, "MeltScope", str(exc))
+
+        if ok:
+            self.statusBar().showMessage(f"sequences saved to {p}", 3000)
 
     def _csv_row(self, it: Item):
         if it.error or not it.result:
